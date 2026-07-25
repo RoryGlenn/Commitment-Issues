@@ -93,7 +93,7 @@ const COMMAND_HELP = [
   {
     name: "commit-fix",
     usage: "commit-fix",
-    summary: "Safely fix and amend the latest unpushed commit",
+    summary: "Safely amend an attached commit using local ref checks",
   },
   {
     name: "fix-staged",

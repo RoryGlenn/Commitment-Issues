@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `commit:fix` now refuses detached or non-branch `HEAD`, signed commits, and
+  commits retained by a local tag or locally known remote ref. It revalidates
+  the exact branch attachment and protected-ref snapshot before mutation, and
+  documents the honest offline boundary: remote-only refs remain unknowable
+  until fetched, because the command never contacts the network.
 - `fix:staged` and `commit:fix` now bind automatic fixes to the exact `HEAD`,
   index file and tree, and target bytes inspected before local tools run.
   ESLint and Prettier transform those captured bytes through stdin; the

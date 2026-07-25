@@ -580,17 +580,73 @@ boxSvg({
 // ---------------- Commit fix ----------------
 
 boxSvg({
-  file: "commit-fix-already-pushed.svg",
+  file: "commit-fix-protected-reference.svg",
   severity: "error",
-  title: "Commit already pushed terminal output",
-  desc: "A terminal-style error box refusing to amend a commit that has already been pushed.",
+  title: "Commit retained by protected reference terminal output",
+  desc: "A terminal-style error box refusing to amend a commit retained by a local tag or known remote ref.",
   lines: [
-    { k: "t", text: "The latest commit has already been pushed." },
+    {
+      k: "t",
+      text: "The latest commit is retained by a protected Git reference.",
+    },
     { k: "b" },
     {
       k: "d",
-      text: "Amending it would rewrite published history. Make a new commit with fixes instead.",
+      text: "A local tag or locally known remote ref already contains it:",
     },
+    { k: "b" },
+    { k: "di", text: "refs/remotes/origin/main" },
+    { k: "b" },
+    {
+      k: "d",
+      text: "Make a new commit with the fixes instead of rewriting this one.",
+    },
+  ],
+});
+
+boxSvg({
+  file: "commit-fix-detached.svg",
+  severity: "error",
+  title: "Detached commit amend refusal terminal output",
+  desc: "A terminal-style error box refusing to amend a detached commit.",
+  lines: [
+    { k: "t", text: "Cannot amend a detached commit." },
+    { k: "b" },
+    {
+      k: "d",
+      text: "The latest commit is not attached to a local branch. Amending it",
+    },
+    {
+      k: "d",
+      text: "could leave the replacement reachable only through Git's reflog.",
+    },
+    {
+      k: "d",
+      text: "Switch to or create the branch that should own it, then try again:",
+    },
+    { k: "b" },
+    { k: "bt", text: "npm run commit:fix" },
+  ],
+});
+
+boxSvg({
+  file: "commit-fix-signed.svg",
+  severity: "error",
+  title: "Signed commit amend refusal terminal output",
+  desc: "A terminal-style error box refusing to replace a signed commit without an explicit signing workflow.",
+  lines: [
+    { k: "t", text: "Cannot automatically amend a signed commit." },
+    { k: "b" },
+    {
+      k: "d",
+      text: "Automatic amend would replace it without an explicitly approved",
+    },
+    { k: "d", text: "signature." },
+    {
+      k: "d",
+      text: "Apply fixes manually, then use your normal signed-amend workflow.",
+    },
+    { k: "d", text: "No index or history was changed." },
   ],
 });
 
@@ -689,19 +745,23 @@ boxSvg({
 boxSvg({
   file: "commit-fix-unverified.svg",
   severity: "error",
-  title: "Cannot verify commit is unpushed terminal output",
-  desc: "A terminal-style error box refusing to amend because Git could not confirm the commit is unpushed.",
+  title: "Cannot inspect commit history safety terminal output",
+  desc: "A terminal-style error box refusing to amend because Git could not inspect the commit's attachment, metadata, tags, or known remote refs.",
   lines: [
-    { k: "t", text: "Unable to verify the latest commit is unpushed." },
+    {
+      k: "t",
+      text: "Unable to prove the latest commit is safe to amend.",
+    },
     { k: "b" },
     {
       k: "d",
-      text: "Amending rewrites history, so nothing was changed. Check that",
+      text: "Amending rewrites history, so nothing was changed.",
     },
     {
       k: "d",
-      text: "Git can list remote branches (git branch -r) and try again.",
+      text: "Check that Git can inspect HEAD, commit metadata, tags, and",
     },
+    { k: "d", text: "remote-tracking refs, then try again." },
   ],
 });
 

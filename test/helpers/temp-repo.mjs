@@ -269,6 +269,7 @@ export function createTempRepo({ commit = true, suppressWelcome = true } = {}) {
   run("git", ["config", "maintenance.auto", "false"], tempDir);
   run("git", ["config", "user.name", "test"], tempDir);
   run("git", ["config", "user.email", "test@example.com"], tempDir);
+  run("git", ["config", "commit.gpgsign", "false"], tempDir);
 
   // Copy the repo's own package.json, but drop its personal `tone` preference.
   // Behavior tests assert on the default (standard) advisory wording; the

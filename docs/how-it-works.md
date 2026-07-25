@@ -115,18 +115,26 @@ bypass behavior.
 
 `commitment-issues` separates safe fix paths from normal advisory checks.
 
-| Command              | Safety rule                                                            |
-| -------------------- | ---------------------------------------------------------------------- |
-| `npm run fix:staged` | Fixes captured staged bytes and refuses partial or concurrent changes. |
-| `npm run commit:fix` | Amends only the same clean, unpushed commit after final state checks.  |
+| Command              | Safety rule                                                                                   |
+| -------------------- | --------------------------------------------------------------------------------------------- |
+| `npm run fix:staged` | Fixes captured staged bytes and refuses partial or concurrent changes.                        |
+| `npm run commit:fix` | Amends only the same clean, attached, unsigned commit after final state and local-ref checks. |
 
 The fixers receive captured content through stdin instead of rewriting live
 project paths. Before staging, the command rechecks `HEAD`, the exact index
 file and tree, and target bytes, then places only known tool output into a
-prepared index under Git's lock. `commit:fix` repeats repository, worktree, and
-publication checks immediately before amending. If revalidation detects that
-another process edited, deleted, replaced, staged, committed, or published
-during the run, the command refuses and leaves that work out of its mutation.
+prepared index under Git's lock. `commit:fix` also requires `HEAD` to remain on
+the same local branch, refuses commit signature headers, and repeats repository,
+worktree, tag, and remote-tracking-ref checks immediately before amending. If
+revalidation detects that another process edited, deleted, replaced, staged,
+committed, attached a protected ref, or changed the active branch during the
+run, the command refuses and leaves that work out of its mutation.
+
+Publication proof is deliberately offline: local tags and remote-tracking refs
+are authoritative inputs, but a ref that exists only on a remote cannot be
+discovered without network access. The command does not contact remotes and
+does not claim that a commit absent from the local ref snapshot was never
+published elsewhere.
 
 The tool prefers refusing a risky mutation over hiding or rewriting work unexpectedly.
 

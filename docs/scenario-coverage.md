@@ -427,7 +427,10 @@ production-readiness workstream #130 is consolidated in the
 - **CFIX-002** — amends and warns when non-fixable lint issues remain. Fixture: `test/commit-fix.test.mjs`.
 - **CFIX-003** — reports the latest commit is already clean when nothing changes (pluralized). Fixture: `test/commit-fix.test.mjs`.
 - **CFIX-004** — the amend summary pluralizes for multiple updated files. Fixture: `test/commit-fix.test.mjs`.
-- **CFIX-005** — refuses to amend a commit that has already been pushed. Fixture: `test/commit-fix.test.mjs`.
+- **CFIX-005** — refuses to amend a commit retained by any local tag or known
+  remote-tracking ref. Direct remote-only tags remain outside the deliberately
+  offline proof until fetched, and that boundary is regression-tested.
+  Fixture: `test/commit-fix.test.mjs`.
 - **CFIX-006** — refuses to amend when tracked worktree changes exist. Fixture: `test/commit-fix.test.mjs`.
 - **CFIX-007** — shows info when the latest commit has no fixable files. Fixture: `test/commit-fix.test.mjs`.
 - **CFIX-008** — guides the user to `git reset --soft HEAD^` when the fixes would empty the commit. Fixture: `test/commit-fix.test.mjs`.
@@ -439,6 +442,12 @@ production-readiness workstream #130 is consolidated in the
   or absorbing the concurrent state. Fixture: `test/commit-fix.test.mjs`.
 - **CFIX-013** — publication while tools run is detected before mutation;
   standard and fun refusals preserve the original commit. Fixture:
+  `test/commit-fix.test.mjs`; unit: `test/message.test.mjs`,
+  `test/fun-tone.test.mjs`.
+- **CFIX-014** — detached or non-branch `HEAD`, signed commit headers, and
+  mid-run branch-attachment changes are refused without moving the commit.
+  Real SSH and OpenPGP signatures are exercised where the host tools support
+  them; synthetic headers keep detection deterministic everywhere. Fixture:
   `test/commit-fix.test.mjs`; unit: `test/message.test.mjs`,
   `test/fun-tone.test.mjs`.
 

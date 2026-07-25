@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="778" height="246" viewBox="0 0 778 246" role="img" aria-labelledby="title desc">
+  <title id="title">Signed commit amend refusal terminal output</title>
+  <desc id="desc">A terminal-style error box refusing to replace a signed commit without an explicit signing workflow.</desc>
+  <rect width="778" height="246" rx="8" ry="8" fill="#181818"/>
+  <g transform="translate(20 24)">
+    <rect x="0" y="0" width="738" height="202" rx="5" ry="5" fill="none" stroke="#ff5f7a" stroke-width="1.3"/>
+    <rect x="332" y="-10" width="74" height="20" fill="#181818"/>
+    <text x="369" y="5" fill="#ff5f7a" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="18" font-weight="700">error</text>
+    <text x="34" y="44" fill="#ff5f7a" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="18" font-weight="700">Cannot automatically amend a signed commit.</text>
+    <text x="34" y="88" fill="#858b91" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="17">Automatic amend would replace it without an explicitly approved</text>
+    <text x="34" y="118" fill="#858b91" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="17">signature.</text>
+    <text x="34" y="148" fill="#858b91" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="17">Apply fixes manually, then use your normal signed-amend workflow.</text>
+    <text x="34" y="178" fill="#858b91" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="17">No index or history was changed.</text>
+  </g>
+</svg>

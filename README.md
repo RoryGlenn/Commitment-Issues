@@ -144,7 +144,7 @@ When the tool reports a safe fix path:
 
 ```bash
 npm run fix:staged   # fix the current staged files before committing
-npm run commit:fix   # fix and amend the latest clean, unpushed commit
+npm run commit:fix   # fix and amend a safe, attached latest commit
 ```
 
 Hooks resolve ESLint and Prettier only from the project's installed
@@ -155,7 +155,8 @@ manager's install command; the hook does not ask `npx` to download it.
 
 - **Advisory adoption:** warnings first; enforcement is per-check opt-in.
 - **Safe explicit fixes:** ambiguous partial staging, dirty tracked worktrees,
-  and pushed history are refused.
+  detached or signed commits, and history retained by a local tag or known
+  remote-tracking ref are refused.
 - **Related push tests:** runs tests associated with the files being pushed.
 - **Debug-junk advisory:** optionally catches common temporary instrumentation
   only on newly staged lines.

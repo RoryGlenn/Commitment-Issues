@@ -118,13 +118,24 @@ function gifMetrics(buffer) {
   };
 }
 
-test("every committed SVG exposes an accessible name and description", () => {
-  const tracked = spawnSync("git", ["ls-files", "*.svg"], {
-    cwd: root,
-    encoding: "utf8",
-  });
+test("every repository SVG exposes an accessible name and description", () => {
+  const tracked = spawnSync(
+    "git",
+    ["ls-files", "--cached", "--others", "--exclude-standard", "--", "*.svg"],
+    {
+      cwd: root,
+      encoding: "utf8",
+    },
+  );
   assert.equal(tracked.status, 0, tracked.stderr);
-  const assetNames = tracked.stdout.trim().split(/\r?\n/).filter(Boolean);
+  const assetNames = [
+    ...new Set(
+      tracked.stdout
+        .trim()
+        .split(/\r?\n/)
+        .filter((name) => name && fs.existsSync(path.join(root, name))),
+    ),
+  ];
 
   assert.ok(assetNames.length > 0);
   for (const name of assetNames) {
@@ -157,7 +168,7 @@ test("message-state SVG generator exactly reproduces its committed assets", (t) 
 
   const generated = fs.readdirSync(path.join(tempDir, "assets")).sort();
   const gallery = read("docs/message-states.md");
-  assert.equal(generated.length, 66);
+  assert.equal(generated.length, 68);
   for (const file of generated) {
     assert.ok(
       gallery.includes(`../assets/${file}`),

@@ -21,10 +21,92 @@ import {
   stageFixOutputs,
 } from "./lib/fix-safety.mjs";
 import { loadPrecommitConfig } from "./lib/config.mjs";
-import { buildConcurrentFixRefusalMessage } from "./lib/message.mjs";
+import {
+  buildCommitFixHistoryRefusalMessage,
+  buildConcurrentFixRefusalMessage,
+} from "./lib/message.mjs";
 
 const GIT_PATH_ARGS = ["-c", "core.quotePath=false"];
 const tone = loadPrecommitConfig().tone;
+
+function fixerStateError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function inspectCommitAmendSafety(head) {
+  const branchResult = run("git", ["symbolic-ref", "--quiet", "HEAD"]);
+  if (branchResult.status !== 0 && branchResult.status !== 1) {
+    return { safe: false, reason: "inspection" };
+  }
+  const branchRef = branchResult.stdout.trim();
+  if (branchResult.status === 1 || !branchRef.startsWith("refs/heads/")) {
+    return { safe: false, reason: "detached" };
+  }
+
+  const referencesResult = run("git", [
+    "for-each-ref",
+    "--format=%(refname)",
+    "--contains",
+    head,
+    "refs/remotes",
+    "refs/tags",
+  ]);
+  if (referencesResult.status !== 0) {
+    return { safe: false, reason: "inspection" };
+  }
+  const references = referencesResult.stdout
+    .split(/\r?\n/u)
+    .filter((reference) => reference.length > 0);
+  if (references.length > 0) {
+    return { safe: false, reason: "retained", references };
+  }
+
+  const commitResult = run("git", [
+    "--no-replace-objects",
+    "cat-file",
+    "commit",
+    head,
+  ]);
+  const headerEnd = commitResult.stdout.indexOf("\n\n");
+  if (commitResult.status !== 0 || headerEnd === -1) {
+    return { safe: false, reason: "inspection" };
+  }
+  const headers = commitResult.stdout.slice(0, headerEnd);
+  if (/(?:^|\n)gpgsig(?:-sha256)? /u.test(headers)) {
+    return { safe: false, reason: "signed" };
+  }
+
+  return { safe: true, branchRef };
+}
+
+function refuseInitialHistoryState(state) {
+  const message = buildCommitFixHistoryRefusalMessage({
+    reason: state.reason,
+    tone,
+    references: state.references,
+    rerunCommand: runScript("commit:fix"),
+  });
+  errorBox(message.lines);
+  process.exit(1);
+}
+
+function assertCommitStillAmendable(head, branchRef) {
+  const state = inspectCommitAmendSafety(head);
+  if (!state.safe && state.reason === "inspection") {
+    throw fixerStateError(
+      "ERR_FIX_STATE_INSPECTION",
+      "Unable to revalidate commit history safety.",
+    );
+  }
+  if (!state.safe || state.branchRef !== branchRef) {
+    throw fixerStateError(
+      "ERR_FIX_STATE_CHANGED",
+      "The original commit is no longer safe to amend.",
+    );
+  }
+}
 
 const headResult = run("git", ["rev-parse", "--verify", "HEAD"]);
 
@@ -40,59 +122,11 @@ if (headResult.error || headResult.status !== 0) {
 }
 
 const initialHead = headResult.stdout.trim();
-const remoteContainsResult = run("git", [
-  "branch",
-  "-r",
-  "--contains",
-  initialHead,
-]);
-
-// Fail closed: if Git cannot answer, the commit cannot be proven unpushed, and
-// amending pushed history is the one thing this command must never do.
-if (remoteContainsResult.error || remoteContainsResult.status !== 0) {
-  errorBox([
-    pc.bold("Unable to verify the latest commit is unpushed."),
-    "",
-    pc.dim("Amending rewrites history, so nothing was changed. Check that"),
-    pc.dim("Git can list remote branches (git branch -r) and try again."),
-  ]);
-  process.exit(1);
+const initialAmendSafety = inspectCommitAmendSafety(initialHead);
+if (!initialAmendSafety.safe) {
+  refuseInitialHistoryState(initialAmendSafety);
 }
-
-const headIsPushed = remoteContainsResult.stdout.trim().length > 0;
-
-if (headIsPushed) {
-  errorBox([
-    pc.bold("The latest commit has already been pushed."),
-    "",
-    pc.dim(
-      "Amending it would rewrite published history. Make a new commit with fixes instead.",
-    ),
-  ]);
-  process.exit(1);
-}
-
-function fixerStateError(code, message) {
-  const error = new Error(message);
-  error.code = code;
-  return error;
-}
-
-function assertHeadUnpublished(head) {
-  const result = run("git", ["branch", "-r", "--contains", head]);
-  if (result.error || result.status !== 0) {
-    throw fixerStateError(
-      "ERR_FIX_STATE_INSPECTION",
-      "Unable to revalidate publication state.",
-    );
-  }
-  if (result.stdout.trim().length > 0) {
-    throw fixerStateError(
-      "ERR_FIX_STATE_CHANGED",
-      "The original commit was published while fixes were running.",
-    );
-  }
-}
+const initialBranchRef = initialAmendSafety.branchRef;
 
 function assertOnlyExpectedUnstagedChanges(expectedFiles) {
   const result = run("git", [...GIT_PATH_ARGS, "diff", "--name-only", "-z"]);
@@ -251,10 +285,10 @@ try {
   }
 
   // Bind the mutation to the same clean repository inspected before the tools
-  // ran, including non-target tracked files and publication state.
+  // ran, including non-target tracked files and history-safety state.
   assertFixSnapshotUnchanged(snapshot);
   assertOnlyExpectedUnstagedChanges([]);
-  assertHeadUnpublished(initialHead);
+  assertCommitStillAmendable(initialHead, initialBranchRef);
 
   const appliedSnapshot = applyFixOutputs(snapshot, fixResult.outputs);
   const expectedChanges = appliedSnapshot.targets
@@ -334,7 +368,7 @@ if (!parentRef.error && parentRef.status === 0) {
 try {
   assertFixSnapshotUnchanged(stagedSnapshot);
   assertOnlyExpectedUnstagedChanges([]);
-  assertHeadUnpublished(initialHead);
+  assertCommitStillAmendable(initialHead, initialBranchRef);
 } catch (error) {
   refuseUnsafeFix(error, "amend");
 }

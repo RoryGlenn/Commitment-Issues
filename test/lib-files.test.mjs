@@ -163,12 +163,26 @@ test("mutable project file reads reject pathname drift after reading", (t) => {
   fs.writeFileSync(file, "{}\n");
   const state = inspectMutableProjectFile(file);
   const originalRead = fs.readFileSync;
+  const originalLstat = fs.lstatSync;
+  let readFinished = false;
   t.mock.method(fs, "readFileSync", (filePath, ...args) => {
     const content = originalRead(filePath, ...args);
     if (typeof filePath === "number") {
-      fs.writeFileSync(file, '{"changed":true}\n');
+      readFinished = true;
     }
     return content;
+  });
+  t.mock.method(fs, "lstatSync", (filePath, ...args) => {
+    const stats = originalLstat(filePath, ...args);
+    if (readFinished && path.resolve(String(filePath)) === file) {
+      return {
+        ...stats,
+        ctimeNs: stats.ctimeNs + 1n,
+        isFile: () => stats.isFile(),
+        isSymbolicLink: () => stats.isSymbolicLink(),
+      };
+    }
+    return stats;
   });
 
   assert.throws(

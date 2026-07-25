@@ -53,7 +53,7 @@ function captureStagedTarget(tempDir, file, options) {
 }
 
 function canonicalTarget(tempDir, file) {
-  return path.join(fs.realpathSync.native(tempDir), ...file.split("/"));
+  return inRepo(tempDir, () => path.resolve(...file.split("/")));
 }
 
 function fixedOutputs(snapshot, content = '{ "alpha": 1 }\n') {
@@ -289,7 +289,7 @@ for (const [code, expectedCode] of [
 
 test("captureFixSnapshot rejects a non-regular Git index", (t) => {
   const { tempDir, file } = createStagedTarget(t);
-  const indexPath = path.join(fs.realpathSync.native(tempDir), ".git", "index");
+  const indexPath = inRepo(tempDir, () => path.resolve(".git", "index"));
   const originalLstat = fs.lstatSync;
   t.mock.method(fs, "lstatSync", (filePath, ...args) => {
     const stats = originalLstat(filePath, ...args);
@@ -315,11 +315,7 @@ for (const [code, expectedCode] of [
 ]) {
   test(`captureFixSnapshot classifies an index read ${code}`, (t) => {
     const { tempDir, file } = createStagedTarget(t);
-    const indexPath = path.join(
-      fs.realpathSync.native(tempDir),
-      ".git",
-      "index",
-    );
+    const indexPath = inRepo(tempDir, () => path.resolve(".git", "index"));
     const originalOpen = fs.openSync;
     t.mock.method(fs, "openSync", (filePath, ...args) => {
       if (path.resolve(String(filePath)) === indexPath) {

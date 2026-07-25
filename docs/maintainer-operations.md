@@ -197,13 +197,17 @@ clean installed copy. When shipped documentation needs repository-only policy,
 planning, or audit evidence, use its canonical GitHub URL rather than expanding
 the npm package solely to make the link resolve.
 
-The tarball must remain at or below **350 KiB compressed** and **768 KiB
+The tarball must remain at or below **350 KiB compressed** and **800 KiB
 unpacked**. Tests fail when the budget is exceeded, required runtime or
 user-documentation files are missing, maintenance tooling or internal evidence
 enters the tarball, or promotional media is included. Do not raise the limits
 merely to accommodate documentation or media growth; a change must identify
 the reviewed runtime requirement and measured package delta that needs the
 additional space.
+
+The 800 KiB unpacked ceiling includes the roughly 26 KiB measured increase
+from the reviewed concurrent-fix transaction runtime added for issue #303; the
+compressed ceiling did not need to change.
 
 ## Release candidate identity
 

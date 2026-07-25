@@ -46,6 +46,47 @@ export function plural(count, singular, pluralValue = `${singular}s`) {
   return count === 1 ? singular : pluralValue;
 }
 
+/**
+ * Build a refusal message when repository state changes during an explicit
+ * fixer command.
+ * @param {{operation: "stage"|"amend", tone?: string, rerunCommand: string}} options - Mutation and presentation context.
+ * @returns {{severity: "error", lines: string[]}} Box model.
+ */
+export function buildConcurrentFixRefusalMessage({
+  operation,
+  tone = "standard",
+  rerunCommand,
+}) {
+  const fun = normalizeTone(tone) === "fun";
+  const mutation =
+    operation === "amend"
+      ? fun
+        ? "The latest commit was left out of the drama."
+        : "The latest commit was not amended."
+      : fun
+        ? "No surprise changes were invited into the commit."
+        : "Concurrent work was not staged.";
+  return {
+    severity: "error",
+    lines: [
+      pc.bold(
+        fun
+          ? "The repository changed the relationship status mid-fix."
+          : "Repository state changed while automatic fixes were running.",
+      ),
+      "",
+      pc.dim(mutation),
+      pc.dim(
+        fun
+          ? "Your other work is still yours. Check the situation, then try again:"
+          : "Concurrent work was preserved. Review git status, then try again:",
+      ),
+      "",
+      `  ${pc.bold(escapeTerminalText(rerunCommand))}`,
+    ],
+  };
+}
+
 function funIssueMessage(issue, message) {
   const prettierMatch = issue.message.match(
     /^(\d+) file(s)? need Prettier formatting$/,

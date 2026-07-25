@@ -31,6 +31,11 @@ const runtimeTestOwners = {
     "test/path-normalization.test.mjs",
     "test/property.test.js",
   ],
+  "scripts/lib/fix-safety.mjs": [
+    "test/fix-safety.test.mjs",
+    "test/fix-staged.test.mjs",
+    "test/commit-fix.test.mjs",
+  ],
   "scripts/lib/hooks.mjs": ["test/hooks.test.mjs"],
   "scripts/lib/json-output.mjs": ["test/json-output.test.mjs"],
   "scripts/lib/local-tool.mjs": ["test/local-tool.test.mjs"],

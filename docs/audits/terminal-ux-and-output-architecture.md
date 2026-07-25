@@ -56,7 +56,7 @@ claim.
 | Shared presentation      | `scripts/lib/ui.mjs` is the only Boxen importer. Severity models use `{ severity, lines }`; commands do not construct borders directly.                                   |
 | Machine output           | `precommit --json` and `prepush --json`, versioned by `docs/json-output.schema.json`; tool output is kept off JSON stdout.                                                |
 | Live gallery             | 42 real-command scenarios in disposable repositories. Each scenario fails the runner if it exits unexpectedly or renders more than one box.                               |
-| Static gallery           | 64 generated message-state SVGs documented in `docs/message-states.md`; exact regeneration is tested.                                                                     |
+| Static gallery           | 66 generated message-state SVGs documented in `docs/message-states.md`; exact regeneration is tested.                                                                     |
 | Visual assets            | All 85 committed SVGs require `role="img"`, `aria-labelledby`, a non-empty `<title>`, and a non-empty `<desc>`.                                                           |
 | Top-level tests          | 44 files covering units, subprocesses, real Git repositories, JSON, message states, assets, packaging, and repository policy.                                             |
 

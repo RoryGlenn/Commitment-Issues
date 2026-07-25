@@ -654,6 +654,51 @@ export function mutableProjectFileUnchanged(state) {
 }
 
 /**
+ * Read exact bytes through a descriptor bound to a previously inspected
+ * regular file. The descriptor and pathname must both retain that identity
+ * for the complete read.
+ * @param {ReturnType<typeof inspectMutableProjectFile>} state - Initial state.
+ * @returns {Buffer} Complete file contents.
+ */
+export function readMutableProjectFile(state) {
+  if (state.status !== "regular" || !mutableProjectFileUnchanged(state)) {
+    throw projectFileChangedError(state.filePath);
+  }
+
+  let descriptor;
+  try {
+    try {
+      descriptor = fs.openSync(
+        state.filePath,
+        fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW,
+      );
+    } catch (error) {
+      if (["ELOOP", "ENOENT", "ENOTDIR"].includes(error?.code)) {
+        throw projectFileChangedError(state.filePath);
+      }
+      throw error;
+    }
+    const opened = fs.fstatSync(descriptor, { bigint: true });
+    if (!opened.isFile() || !sameProjectFileIdentity(state.stats, opened)) {
+      throw projectFileChangedError(state.filePath);
+    }
+    const content = fs.readFileSync(descriptor);
+    const read = fs.fstatSync(descriptor, { bigint: true });
+    if (
+      !sameProjectFileIdentity(opened, read) ||
+      !mutableProjectFileUnchanged(state)
+    ) {
+      throw projectFileChangedError(state.filePath);
+    }
+    return content;
+  } finally {
+    if (descriptor !== undefined) {
+      fs.closeSync(descriptor);
+    }
+  }
+}
+
+/**
  * Check permissions for a later write/removal while rejecting replacements on
  * both sides of the permission probe.
  * @param {ReturnType<typeof inspectMutableProjectFile>} state - Initial state.

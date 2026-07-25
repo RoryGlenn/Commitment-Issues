@@ -5,7 +5,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
 import { withoutGitLocalEnvironment } from "../../scripts/lib/process.mjs";
 
 const helpersDir = path.dirname(fileURLToPath(import.meta.url));
@@ -35,6 +36,76 @@ export function run(command, args, cwd, options = {}) {
     ...options,
     env,
   });
+}
+
+export function runAsync(command, args, cwd, options = {}) {
+  const env = withoutGitLocalEnvironment(options.env ?? process.env);
+  delete env.HUSKY;
+  delete env.COMMITMENT_ISSUES;
+  const child = spawn(command, args, {
+    cwd,
+    ...options,
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const completed = new Promise((resolve) => {
+    child.on("error", (error) => {
+      resolve({ status: null, signal: null, stdout, stderr, error });
+    });
+    child.on("close", (status, signal) => {
+      resolve({ status, signal, stdout, stderr });
+    });
+  });
+  return { child, completed };
+}
+
+export async function waitForPath(filePath, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(filePath)) {
+      return;
+    }
+    await delay(10);
+  }
+  throw new Error(`Timed out waiting for ${filePath}`);
+}
+
+export function installBlockingPrettierFixture(tempDir) {
+  const nodeModules = path.join(tempDir, "node_modules");
+  const current = fs.lstatSync(nodeModules);
+  if (current.isSymbolicLink()) {
+    fs.unlinkSync(nodeModules);
+  } else {
+    fs.rmSync(nodeModules, { recursive: true });
+  }
+  writeFile(
+    path.join(nodeModules, "prettier", "package.json"),
+    `${JSON.stringify({ name: "prettier", bin: "bin/prettier.mjs" })}\n`,
+  );
+  writeFile(
+    path.join(nodeModules, "prettier", "bin", "prettier.mjs"),
+    [
+      'import fs from "node:fs";',
+      'import { setTimeout as delay } from "node:timers/promises";',
+      'let input = "";',
+      'process.stdin.setEncoding("utf8");',
+      "for await (const chunk of process.stdin) input += chunk;",
+      'fs.writeFileSync(process.env.FIXER_READY, "ready");',
+      "while (!fs.existsSync(process.env.FIXER_RELEASE)) await delay(10);",
+      "process.stdout.write(process.env.FIXER_OUTPUT ?? input);",
+      "",
+    ].join("\n"),
+  );
 }
 
 export function writeFile(filePath, content) {

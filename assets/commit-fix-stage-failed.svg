@@ -1,12 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="675" height="156" viewBox="0 0 675 156" role="img" aria-labelledby="title desc">
-  <title id="title">Fixed files could not be staged terminal output</title>
-  <desc id="desc">A terminal-style error box saying fixes ran but the files could not be staged.</desc>
-  <rect width="675" height="156" rx="8" ry="8" fill="#181818"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="665" height="216" viewBox="0 0 665 216" role="img" aria-labelledby="title desc">
+  <title id="title">Commit fix safety revalidation failed terminal output</title>
+  <desc id="desc">A terminal-style error box saying automatic fixes could not be applied or staged safely.</desc>
+  <rect width="665" height="216" rx="8" ry="8" fill="#181818"/>
   <g transform="translate(20 24)">
-    <rect x="0" y="0" width="635" height="112" rx="5" ry="5" fill="none" stroke="#ff5f7a" stroke-width="1.3"/>
-    <rect x="280.5" y="-10" width="74" height="20" fill="#181818"/>
-    <text x="317.5" y="5" fill="#ff5f7a" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="18" font-weight="700">error</text>
-    <text x="34" y="44" fill="#ff5f7a" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="18" font-weight="700">Available fixes ran, but files could not be staged.</text>
-    <text x="34" y="88" fill="#858b91" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="17">Stage the changes manually and amend the latest commit.</text>
+    <rect x="0" y="0" width="625" height="172" rx="5" ry="5" fill="none" stroke="#ff5f7a" stroke-width="1.3"/>
+    <rect x="275.5" y="-10" width="74" height="20" fill="#181818"/>
+    <text x="312.5" y="5" fill="#ff5f7a" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="18" font-weight="700">error</text>
+    <text x="34" y="44" fill="#ff5f7a" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="18" font-weight="700">Unable to apply automatic fixes safely.</text>
+    <text x="34" y="88" fill="#858b91" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="17">The repository could not be revalidated, so the commit</text>
+    <text x="34" y="118" fill="#858b91" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="17">was not amended. Review git status, then try again.</text>
+    <text x="34" y="148" fill="#858b91" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="17">Unable to prepare exact staged fixes.</text>
   </g>
 </svg>

@@ -447,19 +447,21 @@ export function detachedForPlatform(platform) {
 
 /**
  * Asynchronous spawn with a structured outcome. Pass `echo: true` to tee the
- * child's output live while still capturing it. `timeoutMs` overrides the
- * configured tool deadline for a single call and is not forwarded to spawn.
+ * child's output live while still capturing it. `input` sends exact stdin
+ * bytes and closes the stream. `timeoutMs` overrides the configured tool
+ * deadline for a single call. Neither helper option is forwarded to spawn.
  *
  * On POSIX, the child leads a new process group so timeout cleanup includes its
  * descendants. On Windows, timeout cleanup uses `taskkill /t /f`.
  * @param {string} command - Executable.
  * @param {string[]} args - Arguments.
- * @param {object} [options] - spawn options plus optional `echo`/`timeoutMs`.
+ * @param {object} [options] - spawn options plus optional `echo`/`input`/`timeoutMs`.
  * @returns {Promise<{outcome: ProcessOutcome, timedOut: boolean, error?: Error, status: number|null, signal: string|null, stdout: string, stderr: string, cleanup?: string}>} Result.
  */
 export function spawnAsync(command, args, options = {}) {
   const {
     echo = false,
+    input,
     timeoutMs = TOOL_TIMEOUT_MS,
     ...spawnOptions
   } = options;
@@ -548,6 +550,12 @@ export function spawnAsync(command, args, options = {}) {
           process.stderr.write(chunk);
         }
       });
+    }
+    if (input !== undefined && child.stdin) {
+      // A child may exit before consuming all input. Its process outcome is
+      // authoritative; suppress the resulting EPIPE on the parent stream.
+      child.stdin.on("error", () => {});
+      child.stdin.end(input);
     }
 
     child.on("error", (error) => {

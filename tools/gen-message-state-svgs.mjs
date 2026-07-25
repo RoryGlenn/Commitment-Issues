@@ -721,14 +721,43 @@ boxSvg({
 });
 
 boxSvg({
+  file: "commit-fix-concurrent.svg",
+  severity: "error",
+  title: "Commit fix concurrent-state refusal terminal output",
+  desc: "A terminal-style error box refusing to amend after repository state changes during automatic fixes.",
+  lines: [
+    {
+      k: "t",
+      text: "Repository state changed while automatic fixes were running.",
+    },
+    { k: "b" },
+    { k: "d", text: "The latest commit was not amended." },
+    {
+      k: "d",
+      text: "Concurrent work was preserved. Review git status, then try again:",
+    },
+    { k: "b" },
+    { k: "bt", text: "npm run commit:fix" },
+  ],
+});
+
+boxSvg({
   file: "commit-fix-stage-failed.svg",
   severity: "error",
-  title: "Fixed files could not be staged terminal output",
-  desc: "A terminal-style error box saying fixes ran but the files could not be staged.",
+  title: "Commit fix safety revalidation failed terminal output",
+  desc: "A terminal-style error box saying automatic fixes could not be applied or staged safely.",
   lines: [
-    { k: "t", text: "Available fixes ran, but files could not be staged." },
+    { k: "t", text: "Unable to apply automatic fixes safely." },
     { k: "b" },
-    { k: "d", text: "Stage the changes manually and amend the latest commit." },
+    {
+      k: "d",
+      text: "The repository could not be revalidated, so the commit",
+    },
+    {
+      k: "d",
+      text: "was not amended. Review git status, then try again.",
+    },
+    { k: "d", text: "Unable to prepare exact staged fixes." },
   ],
 });
 
@@ -1336,17 +1365,39 @@ boxSvg({
 });
 
 boxSvg({
-  file: "fix-staged-restage-failed.svg",
+  file: "fix-staged-concurrent.svg",
   severity: "error",
-  title: "Fix staged restage failed terminal output",
-  desc: "A terminal-style error box saying fixes were applied to the working tree but git add failed to restage them.",
+  title: "Fix staged concurrent-state refusal terminal output",
+  desc: "A terminal-style error box refusing to stage after repository state changes during automatic fixes.",
   lines: [
-    { k: "t", text: "Unable to restage fixed files." },
+    {
+      k: "t",
+      text: "Repository state changed while automatic fixes were running.",
+    },
     { k: "b" },
-    { k: "d", text: "Automatic fixes were applied to the working tree, but" },
+    { k: "d", text: "Concurrent work was not staged." },
     {
       k: "d",
-      text: "`git add` failed. Review `git status` and stage manually.",
+      text: "Concurrent work was preserved. Review git status, then try again:",
+    },
+    { k: "b" },
+    { k: "bt", text: "npm run fix:staged" },
+  ],
+});
+
+boxSvg({
+  file: "fix-staged-restage-failed.svg",
+  severity: "error",
+  title: "Fix staged safety revalidation failed terminal output",
+  desc: "A terminal-style error box saying automatic fixes could not be applied or staged safely.",
+  lines: [
+    { k: "t", text: "Unable to apply automatic fixes safely." },
+    { k: "b" },
+    { k: "d", text: "Exact staging could not be verified." },
+    { k: "d", text: "Unable to prepare exact staged fixes." },
+    {
+      k: "d",
+      text: "Review git status and the tool output, then try again.",
     },
   ],
 });

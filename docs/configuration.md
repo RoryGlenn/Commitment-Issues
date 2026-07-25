@@ -227,8 +227,11 @@ made absolute so Node cannot interpret a repository filename as an option.
   `commitment-issues commit-msg`; it stays silent when commitlint succeeds.
 - `blockPushOnTestFailure` turns pushed-file test failures into a hard gate.
 - When automatic fixes can still be applied safely after a commit, the hook suggests `npm run commit:fix`.
-- `npm run fix:staged` applies staged-only ESLint and Prettier fixes directly and restages the result.
-- `npm run commit:fix` applies automatic fixes to the latest clean commit and amends it in place.
+- `npm run fix:staged` applies ESLint and Prettier to captured staged bytes,
+  uses bounded tool concurrency under one shared timeout, revalidates
+  repository state, and stages only attributable output.
+- `npm run commit:fix` uses the same bounded fix transaction on the latest
+  clean commit and amends it in place.
 
 ## TypeScript and mixed projects
 
@@ -550,6 +553,10 @@ All options are optional and use the same types in either configuration file:
 | `secretExempt`             | string[]                        | `[]`                         | Glob patterns excluded from the secrets scan (e.g. test fixtures).                                             |
 | `commitMessage`            | object                          | disabled                     | Optional project-local commitlint integration; see the nested keys above.                                      |
 
+For batching, `timeoutMs` is one overall deadline rather than a fresh allowance
+for every child. This includes the complete captured-input ESLint and Prettier
+fan-out of one `fix:staged` or `commit:fix` operation.
+
 Unrecognized configuration keys, including nested `commitMessage` keys, are ignored and named with their effective source in diagnostics from hooks, `init`, and `doctor` — so typos like `requireTest` or `commitMessage.enable` cannot silently disable, enable, or enforce a check.
 
 Recognized keys with the wrong value type (for example a string where a boolean is expected, or an out-of-range `timeoutMs`) are likewise ignored and fall back to their defaults, and the hooks print a one-line warning naming each invalid value — so a mistyped value cannot silently change behavior either. Both warnings are advisory only: the commit or push still proceeds.
@@ -573,9 +580,12 @@ Recognized keys with the wrong value type (for example a string where a boolean 
 - `scripts/init.mjs` — one-command setup for a consuming repo.
 - `scripts/prepush.mjs` — the advisory-by-default pre-push test runner; can become a blocking gate through configuration.
 - `scripts/doctor.mjs` — verifies and repairs the hook wiring.
-- `scripts/fix-staged.mjs` — applies staged-only ESLint/Prettier fixes and restages the result.
+- `scripts/fix-staged.mjs` — applies staged-only ESLint/Prettier fixes through
+  the concurrent-state transaction and stages exact output blobs.
 - `scripts/fix-staged-js.mjs` — file-list fixer task: ESLint fix followed by Prettier write.
-- `scripts/commit-fix.mjs` — applies automatic fixes to the latest clean commit and amends it in place.
+- `scripts/commit-fix.mjs` — applies automatic fixes to the latest clean,
+  unpushed commit and amends only after final repository and publication
+  revalidation.
 - `scripts/lib/` — shared helpers for UI, spawning, file heuristics, output parsing, advisory messages, and config loading.
 
 ## Continuous integration

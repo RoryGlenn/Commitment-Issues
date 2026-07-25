@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `fix:staged` and `commit:fix` now bind automatic fixes to the exact `HEAD`,
+  index file and tree, and target bytes inspected before local tools run.
+  ESLint and Prettier transform those captured bytes through stdin; the
+  commands revalidate repository and publication state before staging or
+  amending, install only attributable blobs under Git's index lock, and refuse
+  detected concurrent edits, deletion, type replacement, index updates, `HEAD`
+  moves, or publication without absorbing user work. Per-file tool processes
+  use bounded concurrency and one shared timeout for the complete fix.
 - Setup and uninstall no longer truncate consumer-owned project files in
   place. Complete replacement bytes are staged, permissioned, synced, closed,
   and revalidated byte-for-byte through a no-follow descriptor before an atomic

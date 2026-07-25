@@ -597,17 +597,34 @@ Shown when the repository has no commit yet (or HEAD cannot be resolved).
 
 Shown when the latest commit contains no files the staged fixers handle.
 
-### Fixes could not be staged or amended
+### Repository changed during commit fix
 
 <p>
-  <img src="../assets/commit-fix-stage-failed.svg" alt="Error output showing fixes ran but the files could not be staged" width="675">
+  <img src="../assets/commit-fix-concurrent.svg" alt="Error output refusing to amend after repository state changed while fixers ran" width="778">
+</p>
+
+Shown when revalidation detects that a target was edited, deleted, or replaced,
+the index changed, `HEAD` moved, or the original commit became published while
+tools ran. The command preserves the concurrent state and does not amend.
+
+The fun-tone title is
+`The repository changed the relationship status mid-fix`; it says the latest
+commit was left out of the drama without changing the refusal.
+
+### Fixes could not be applied safely or amended
+
+<p>
+  <img src="../assets/commit-fix-stage-failed.svg" alt="Error output showing exact fixes could not be applied or staged safely" width="665">
 </p>
 
 <p>
   <img src="../assets/commit-fix-amend-failed.svg" alt="Error output showing the staged fixes could not be amended into the commit" width="786">
 </p>
 
-Shown when the fixes were produced but `git add` or `git commit --amend` failed; both boxes explain the manual recovery step.
+The first box covers an unavailable snapshot, blob, index lock, or other
+revalidation failure before amend; it never asks `git add` to reread live
+worktree bytes. The second appears after exact fixes were safely staged but
+`git commit --amend` itself failed and explains the manual recovery step.
 
 ### Git state could not be inspected
 
@@ -685,13 +702,30 @@ Shown when a staged file no longer exists on disk (for example, a broken symlink
 
 Shown when a Git probe fails before fixing starts; `fix:staged` stops rather than risk an unsafe index refresh.
 
-### Fixed files could not be restaged
+### Repository changed during staged fixes
 
 <p>
-  <img src="../assets/fix-staged-restage-failed.svg" alt="Error output showing fixes were applied to the working tree but git add failed" width="696">
+  <img src="../assets/fix-staged-concurrent.svg" alt="Error output refusing to stage after repository state changed while fixers ran" width="778">
 </p>
 
-Shown when the fixers ran but the final `git add` failed: the fixes are safe in the working tree, and the command explains how to stage them manually.
+Shown when revalidation detects that a target was edited, deleted, or replaced,
+the index changed, or `HEAD` moved while staged fixes were computed. No
+ambiguous bytes are staged; the concurrent state remains available in
+`git status`.
+
+The fun-tone title is
+`The repository changed the relationship status mid-fix`; it says no surprise
+changes were invited into the commit without changing the refusal.
+
+### Fixed output could not be applied safely
+
+<p>
+  <img src="../assets/fix-staged-restage-failed.svg" alt="Error output showing exact fixes could not be applied or staged safely" width="665">
+</p>
+
+Shown when the exact snapshot, crash-safe file replacement, prepared index, or
+Git lock cannot be completed. The command reports that exact staging could not
+be verified and directs the user to review `git status` and tool output.
 
 ## Pre-push
 

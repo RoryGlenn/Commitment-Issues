@@ -37,6 +37,7 @@
     "scripts/lib/config.mjs",
     "scripts/lib/debug-artifacts.mjs",
     "scripts/lib/files.mjs",
+    "scripts/lib/fix-safety.mjs",
     "scripts/lib/hooks.mjs",
     "scripts/lib/json-output.mjs",
     "scripts/lib/local-tool.mjs",

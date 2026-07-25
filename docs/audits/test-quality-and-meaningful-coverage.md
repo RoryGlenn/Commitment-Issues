@@ -19,7 +19,7 @@ focused regression coverage:
    dependency.
 2. `scripts/lib/logo.mjs` was executed incidentally but had no direct assertion
    for its exact output or fresh-value contract. It now has a semantic unit test.
-3. The 64 generated message-state SVGs matched their generator, but no test
+3. The 66 generated message-state SVGs matched their generator, but no test
    prevented a generator edit from leaving committed assets stale. A private
    temporary regeneration now compares every asset byte-for-byte and checks
    gallery ownership.
@@ -60,7 +60,7 @@ maintenance exclusions, and meaningful-coverage rules are in
 | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | `tools/check-dco-range.mjs`        | `test/dco.test.mjs`, metadata/workflow invariants, and both DCO workflow entrypoints                                  |
 | `tools/compare-demo-gifs.mjs`      | `test/demo-visual-comparison.test.mjs`, `test/visual-assets.test.mjs`, and the render workflow contract               |
-| `tools/gen-message-state-svgs.mjs` | `test/visual-assets.test.mjs` regenerates all 64 assets in a private temp directory and compares exact bytes          |
+| `tools/gen-message-state-svgs.mjs` | `test/visual-assets.test.mjs` regenerates all 66 assets in a private temp directory and compares exact bytes          |
 | `tools/release-preflight.mjs`      | `test/release-integrity.test.mjs` covers local/remote tag, release, registry, signal, malformed, and success outcomes |
 | `tools/show-message-states.mjs`    | `test/message-state-runner.test.mjs` covers list/filter/run/error/cleanup behavior                                    |
 
@@ -70,7 +70,7 @@ maintenance exclusions, and meaningful-coverage rules are in
 | --------- | --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | Medium    | `.github/workflows/ci.yml:123-142`; regression at `test/test-quality.test.mjs:124-135`        | A skipped or otherwise incomplete required dependency could leave `CI Success` green.           | Fixed fail-closed: DCO, `check`, and `pm-lifecycle` must each report exactly `success`.                                                     |
 | Low       | `scripts/lib/logo.mjs:8-37`; direct evidence at `test/logo.test.mjs:10-23`                    | Coverage execution did not prove the visible wordmark, tagline, layout, or fresh return value.  | Added an exact ANSI-normalized output assertion and caller-mutation regression.                                                             |
-| Low       | `tools/gen-message-state-svgs.mjs:150-196`; regression at `test/visual-assets.test.mjs:48-81` | Generator and committed gallery assets could drift while existing static SVG checks still pass. | Added isolated regeneration, exact 64-file comparison, gallery references, and automatic cleanup.                                           |
+| Low       | `tools/gen-message-state-svgs.mjs:150-196`; regression at `test/visual-assets.test.mjs:48-81` | Generator and committed gallery assets could drift while existing static SVG checks still pass. | Added isolated regeneration, exact 66-file comparison, gallery references, and automatic cleanup.                                           |
 | Low       | selection evidence at `test/prepush.test.mjs:159-240`                                         | The combined rename path was implemented but not explicitly protected against a future bypass.  | Added a real-Git source+test rename whose failing renamed test must be selected and block.                                                  |
 | Accepted  | `scripts/init.mjs:264`; `scripts/uninstall.mjs:211`                                           | A filesystem can change after successful preflight and before the guarded write.                | Keep the two defensive race handlers suppressed; preflight/error behavior is fully exercised and the exact suppressions are locked by test. |
 | Follow-up | issue #95                                                                                     | Very large repositories may expose test-selection latency or process-volume limits.             | Kept as a dedicated benchmark issue; the later bounded baseline and Windows argv analysis are recorded in `docs/performance.md`.            |
@@ -161,7 +161,7 @@ dependency tree:
 | clean temporary Git checkout: `npm ci` then `npm test` | passed; 268 packages, 0 vulnerabilities, 671 tests, 0 failures/skips   |
 | five repeated stateful-suite rounds                    | passed; 5/5, no failures                                               |
 | serial shuffled top-level suites, seeds 132 and 3132   | passed; 42/42 files in both orders, no failures                        |
-| message-state generator comparison                     | passed; 64/64 generated assets present, referenced, and byte-identical |
+| message-state generator comparison                     | passed; 66/66 generated assets present, referenced, and byte-identical |
 | `git diff --check`                                     | passed                                                                 |
 
 The pull request and CI results are the final reviewable evidence. This issue

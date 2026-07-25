@@ -1297,20 +1297,47 @@ process.stdout.write(JSON.stringify({ reads, failures }) + "\\n");
     await once(reader.stdout, "data");
   }
 
+  let unexpectedWriteError;
   for (let version = 1; version <= 40; version += 1) {
     const replacement = `${JSON.stringify({
       version,
       payload: String(version).repeat(32_768),
     })}\n`;
-    writeMutableProjectFile(inspectMutableProjectFile(file), replacement);
+    try {
+      writeMutableProjectFile(inspectMutableProjectFile(file), replacement);
+    } catch (error) {
+      const safeWindowsReaderLock =
+        process.platform === "win32" &&
+        (error?.code === "EPERM" || error?.code === "EACCES");
+      if (!safeWindowsReaderLock) {
+        unexpectedWriteError = error;
+        break;
+      }
+      assert.doesNotThrow(() => JSON.parse(fs.readFileSync(file, "utf8")));
+      assert.deepEqual(mutableProjectFileArtifacts(dir, "package.json"), []);
+    }
   }
   fs.writeFileSync(stop, "");
   const [status] = await once(reader, "exit");
 
+  if (unexpectedWriteError) {
+    throw unexpectedWriteError;
+  }
   assert.equal(status, 0, stderr);
   const report = JSON.parse(stdout.trim().split("\n").at(-1));
   assert.ok(report.reads > 0);
   assert.deepEqual(report.failures, []);
+
+  const replacementAfterReader = `${JSON.stringify({
+    version: 41,
+    payload: "after-reader",
+  })}\n`;
+  writeMutableProjectFile(
+    inspectMutableProjectFile(file),
+    replacementAfterReader,
+  );
+  assert.equal(fs.readFileSync(file, "utf8"), replacementAfterReader);
+  assert.deepEqual(mutableProjectFileArtifacts(dir, "package.json"), []);
 });
 
 test("mutable project file writes and removals reject invalid or replaced state", (t) => {

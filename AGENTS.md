@@ -22,6 +22,17 @@ workflow.
   | Versions, changelog releases, tags, npm publishing, or failed-release recovery             | [`.github/skills/release-and-publish/SKILL.md`](.github/skills/release-and-publish/SKILL.md)   |
   | Workflows, branch protection, Dependabot, security settings, labels, or roadmap governance | [`.github/skills/github-governance/SKILL.md`](.github/skills/github-governance/SKILL.md)       |
 
+## Protect project health without scope creep
+
+- Record and prioritize genuine newly discovered findings, but do not silently
+  expand an implementation task into unrelated repair work.
+- Fix a new finding in the current task only when it directly breaks the
+  requested change, creates a data or security risk, or blocks the current pull
+  request.
+- Otherwise, capture the finding's evidence and severity in a linked follow-up
+  issue. Reserve its repair for an explicit dedicated repository-health,
+  CI/review, merge, or release task.
+
 ## Semantic context policy
 
 This repository can inject a small, current semantic-graph neighborhood into

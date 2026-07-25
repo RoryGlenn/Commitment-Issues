@@ -141,6 +141,8 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "brace-expansion": "file:tools/compat/brace-expansion",
+    "brace-expansion-modern": "npm:brace-expansion@5.0.8",
     "commitment-issues": "file:",
     "eslint": "^9.39.4",
     "eslint-plugin-react": "^7.37.5",

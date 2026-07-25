@@ -4,6 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
@@ -71,6 +72,42 @@ function prepareBlockingCommit(tempDir, file = "src/race.json") {
 function hideNodeModules(tempDir) {
   fs.unlinkSync(path.join(tempDir, "node_modules"));
   fs.mkdirSync(path.join(tempDir, "node_modules"));
+}
+
+function commitFixableJson(tempDir, name, message) {
+  const file = `src/${name}.json`;
+  writeFile(path.join(tempDir, "src", `${name}.json`), '{"alpha":1}\n');
+  run("git", ["add", file], tempDir);
+  const committed = run("git", ["commit", "-m", message], tempDir);
+  assert.equal(committed.status, 0, committed.stderr);
+  return file;
+}
+
+function addSyntheticSignatureHeader(tempDir, header) {
+  const originalHead = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+  const original = run(
+    "git",
+    ["cat-file", "commit", originalHead],
+    tempDir,
+  ).stdout;
+  const separator = original.indexOf("\n\n");
+  assert.ok(separator > 0);
+  const signed = `${original.slice(0, separator)}\n${header} -----BEGIN PGP SIGNATURE-----\n synthetic-test-signature\n -----END PGP SIGNATURE-----${original.slice(separator)}`;
+  const stored = run(
+    "git",
+    ["hash-object", "-t", "commit", "-w", "--stdin"],
+    tempDir,
+    { input: signed },
+  );
+  assert.equal(stored.status, 0, stored.stderr);
+  const signedHead = stored.stdout.trim();
+  const updated = run(
+    "git",
+    ["update-ref", "HEAD", signedHead, originalHead],
+    tempDir,
+  );
+  assert.equal(updated.status, 0, updated.stderr);
+  return signedHead;
 }
 
 function failMatchingGitAfterEnv(tempDir, matchSubstring, allowedCalls) {
@@ -207,51 +244,405 @@ test("errors when there is no commit to inspect", (t) => {
   assert.match(output, /Unable to inspect the latest commit\./);
 });
 
-test("refuses to amend a commit that has already been pushed", (t) => {
+test("refuses to amend a detached commit without moving it", (t) => {
   const tempDir = createTempRepo();
   t.after(() => cleanupTempRepo(tempDir));
-  addBareRemote(tempDir); // HEAD now exists on origin/main
+  commitFixableJson(tempDir, "detached", "detached target");
+  const originalHead = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+  run("git", ["switch", "--detach", "HEAD"], tempDir);
 
   const result = runCommitFix(tempDir);
   const output = `${result.stdout}${result.stderr}`;
 
   assert.equal(result.status, 1);
-  assert.match(output, /already been pushed/);
+  assert.match(output, /Cannot amend a detached commit\./);
+  assert.match(output, /reachable only through Git's reflog/);
+  assert.equal(
+    run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+    originalHead,
+  );
+  assert.equal(run("git", ["branch", "--show-current"], tempDir).stdout, "");
 });
 
-test("refuses to amend when the pushed check cannot run", (t) => {
+test("refuses a symbolic HEAD that is not a local branch", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const env = fakeGitEnv(
+    tempDir,
+    "symbolic-ref --quiet HEAD",
+    0,
+    "refs/custom/current\n",
+  );
+
+  const result = runCommitFix(tempDir, { env });
+
+  assert.equal(result.status, 1);
+  assert.match(
+    `${result.stdout}${result.stderr}`,
+    /Cannot amend a detached commit\./,
+  );
+});
+
+test("refuses when attached-HEAD state cannot be inspected", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const env = fakeGitEnv(tempDir, "symbolic-ref --quiet HEAD", 2);
+
+  const result = runCommitFix(tempDir, { env });
+
+  assert.equal(result.status, 1);
+  assert.match(
+    `${result.stdout}${result.stderr}`,
+    /Unable to prove the latest commit is safe to amend\./,
+  );
+});
+
+test("refuses a commit retained by a local tag", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  commitFixableJson(tempDir, "tagged", "tagged target");
+  run("git", ["tag", "reviewed-snapshot"], tempDir);
+
+  const result = runCommitFix(tempDir);
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 1);
+  assert.match(output, /retained by a protected Git reference/);
+  assert.match(output, /refs\/tags\/reviewed-snapshot/);
+});
+
+test("refuses a commit retained by a custom known remote ref", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  commitFixableJson(tempDir, "custom-ref", "custom ref target");
+  const originalHead = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+  run(
+    "git",
+    ["update-ref", "refs/remotes/origin/reviews/accepted", originalHead],
+    tempDir,
+  );
+
+  const result = runCommitFix(tempDir);
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 1);
+  assert.match(output, /refs\/remotes\/origin\/reviews\/accepted/);
+  assert.equal(
+    run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+    originalHead,
+  );
+});
+
+test("refuses to amend a commit retained by a remote-tracking ref", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const remoteDir = addBareRemote(tempDir); // HEAD now exists on origin/main
+  t.after(() => fs.rmSync(remoteDir, { recursive: true, force: true }));
+
+  const result = runCommitFix(tempDir);
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 1);
+  assert.match(output, /retained by a protected Git reference/);
+  assert.match(output, /refs\/remotes\/origin\/main/);
+});
+
+test("limits the offline proof to local tags and remote-tracking refs", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const remoteDir = addBareRemote(tempDir);
+  t.after(() => fs.rmSync(remoteDir, { recursive: true, force: true }));
+  commitFixableJson(tempDir, "remote-only-tag", "remote-only tag target");
+  const originalHead = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+  const pushed = run(
+    "git",
+    ["push", "origin", "HEAD:refs/tags/remote-only-snapshot"],
+    tempDir,
+  );
+  assert.equal(pushed.status, 0, pushed.stderr);
+  assert.equal(
+    run(
+      "git",
+      ["show-ref", "--verify", "--quiet", "refs/tags/remote-only-snapshot"],
+      tempDir,
+    ).status,
+    1,
+  );
+
+  const result = runCommitFix(tempDir);
+
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  assert.notEqual(
+    run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+    originalHead,
+  );
+  assert.equal(
+    run(
+      "git",
+      ["--git-dir", remoteDir, "rev-parse", "refs/tags/remote-only-snapshot"],
+      tempDir,
+    ).stdout.trim(),
+    originalHead,
+  );
+});
+
+test("refuses to amend when protected refs cannot be inspected", (t) => {
   const tempDir = createTempRepo();
   t.after(() => cleanupTempRepo(tempDir));
 
-  // Fail only `git branch -r --contains HEAD`; the command must fail closed
-  // rather than assume the commit is unpushed.
-  const env = fakeGitEnv(tempDir, "branch -r --contains");
+  const env = fakeGitEnv(
+    tempDir,
+    "for-each-ref --format=%(refname) --contains",
+  );
   const result = runCommitFix(tempDir, { env });
   const output = `${result.stdout}${result.stderr}`;
 
   assert.equal(result.status, 1);
-  assert.match(output, /Unable to verify the latest commit is unpushed\./);
+  assert.match(output, /Unable to prove the latest commit is safe to amend\./);
 });
 
-test("fails closed when publication state cannot be revalidated", (t) => {
+test("refuses when commit metadata cannot be inspected", (t) => {
+  for (const fixture of [
+    { name: "failed query", status: 1, stdout: "" },
+    { name: "malformed commit", status: 0, stdout: "tree malformed\n" },
+  ]) {
+    const tempDir = createTempRepo();
+    t.after(() => cleanupTempRepo(tempDir));
+    const env = fakeGitEnv(
+      tempDir,
+      "cat-file commit",
+      fixture.status,
+      fixture.stdout,
+    );
+
+    const result = runCommitFix(tempDir, { env });
+
+    assert.equal(result.status, 1, fixture.name);
+    assert.match(
+      `${result.stdout}${result.stderr}`,
+      /Unable to prove the latest commit is safe to amend\./,
+      fixture.name,
+    );
+  }
+});
+
+for (const header of ["gpgsig", "gpgsig-sha256"]) {
+  test(`refuses a commit carrying a ${header} signature header`, (t) => {
+    const tempDir = createTempRepo();
+    t.after(() => cleanupTempRepo(tempDir));
+    commitFixableJson(tempDir, `synthetic-${header}`, "signed target");
+    const signedHead = addSyntheticSignatureHeader(tempDir, header);
+
+    const result = runCommitFix(tempDir);
+    const output = `${result.stdout}${result.stderr}`;
+
+    assert.equal(result.status, 1);
+    assert.match(output, /Cannot automatically amend a signed commit\./);
+    assert.match(output, /No index or history was changed\./);
+    assert.equal(
+      run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+      signedHead,
+    );
+  });
+}
+
+test("refuses a real SSH-signed commit when Git supports SSH signing", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const signingKey = path.join(tempDir, "commit-fix-signing-key");
+  const generated = run(
+    "ssh-keygen",
+    ["-q", "-t", "ed25519", "-N", "", "-f", signingKey],
+    tempDir,
+  );
+  if (generated.error || generated.status !== 0) {
+    t.skip("ssh-keygen is unavailable on this host");
+    return;
+  }
+
+  const file = "src/ssh-signed.json";
+  writeFile(path.join(tempDir, ...file.split("/")), '{"alpha":1}\n');
+  run("git", ["add", file], tempDir);
+  const committed = run(
+    "git",
+    [
+      "-c",
+      "gpg.format=ssh",
+      "-c",
+      `user.signingkey=${signingKey}`,
+      "-c",
+      "commit.gpgsign=true",
+      "commit",
+      "-m",
+      "SSH signed target",
+    ],
+    tempDir,
+  );
+  if (committed.status !== 0) {
+    t.skip(`Git SSH signing is unavailable: ${committed.stderr.trim()}`);
+    return;
+  }
+  const signedHead = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+  assert.match(
+    run("git", ["cat-file", "commit", "HEAD"], tempDir).stdout,
+    /BEGIN SSH SIGNATURE/,
+  );
+
+  const result = runCommitFix(tempDir);
+
+  assert.equal(result.status, 1);
+  assert.match(
+    `${result.stdout}${result.stderr}`,
+    /Cannot automatically amend a signed commit\./,
+  );
+  assert.equal(
+    run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+    signedHead,
+  );
+});
+
+test("refuses a real OpenPGP-signed commit when GPG is available", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const gpgHome = fs.mkdtempSync(path.join(os.tmpdir(), "commit-fix-gpg-"));
+  fs.chmodSync(gpgHome, 0o700);
+  t.after(() => fs.rmSync(gpgHome, { recursive: true, force: true }));
+  const env = { ...process.env, GNUPGHOME: gpgHome };
+  const generated = run(
+    "gpg",
+    [
+      "--batch",
+      "--pinentry-mode",
+      "loopback",
+      "--passphrase",
+      "",
+      "--quick-generate-key",
+      "Commit Fix Test <commit-fix@example.invalid>",
+      "rsa2048",
+      "sign",
+      "0",
+    ],
+    tempDir,
+    { env },
+  );
+  if (generated.error || generated.status !== 0) {
+    t.skip("GPG key generation is unavailable on this host");
+    return;
+  }
+  const listed = run(
+    "gpg",
+    ["--batch", "--with-colons", "--list-secret-keys"],
+    tempDir,
+    { env },
+  );
+  const fingerprint = listed.stdout
+    .split(/\r?\n/u)
+    .find((line) => line.startsWith("fpr:"))
+    ?.split(":")[9];
+  if (!fingerprint) {
+    t.skip("GPG did not expose the generated signing key");
+    return;
+  }
+
+  const file = "src/openpgp-signed.json";
+  writeFile(path.join(tempDir, ...file.split("/")), '{"alpha":1}\n');
+  run("git", ["add", file], tempDir);
+  const committed = run(
+    "git",
+    [
+      "-c",
+      "gpg.format=openpgp",
+      "-c",
+      "gpg.program=gpg",
+      "-c",
+      `user.signingkey=${fingerprint}`,
+      "-c",
+      "commit.gpgsign=true",
+      "commit",
+      "-m",
+      "OpenPGP signed target",
+    ],
+    tempDir,
+    { env },
+  );
+  if (committed.status !== 0) {
+    t.skip(`Git OpenPGP signing is unavailable: ${committed.stderr.trim()}`);
+    return;
+  }
+  const signedHead = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+  assert.match(
+    run("git", ["cat-file", "commit", "HEAD"], tempDir).stdout,
+    /BEGIN PGP SIGNATURE/,
+  );
+
+  const result = runCommitFix(tempDir);
+
+  assert.equal(result.status, 1);
+  assert.match(
+    `${result.stdout}${result.stderr}`,
+    /Cannot automatically amend a signed commit\./,
+  );
+  assert.equal(
+    run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+    signedHead,
+  );
+});
+
+test("fails closed when protected refs cannot be revalidated", (t) => {
   const tempDir = createTempRepo();
   t.after(() => cleanupTempRepo(tempDir));
   writeFile(path.join(tempDir, "src", "publication.json"), '{"alpha":1}\n');
   run("git", ["add", "src/publication.json"], tempDir);
   run("git", ["commit", "-m", "publication check"], tempDir);
   const originalHead = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
-  const env = failMatchingGitAfterEnv(tempDir, "branch -r --contains", 1);
+  const env = failMatchingGitAfterEnv(
+    tempDir,
+    "for-each-ref --format=%(refname) --contains",
+    1,
+  );
 
   const result = runCommitFix(tempDir, { env });
   const output = `${result.stdout}${result.stderr}`;
 
   assert.equal(result.status, 1);
-  assert.match(output, /Unable to revalidate publication state/);
+  assert.match(output, /Unable to revalidate commit history safety/);
   assert.equal(
     run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
     originalHead,
   );
 });
+
+for (const probe of [
+  {
+    command: "symbolic-ref --quiet HEAD",
+    message: /Repository state changed while automatic fixes/,
+  },
+  {
+    command: "cat-file commit",
+    message: /Unable to revalidate commit history safety/,
+  },
+]) {
+  test(`fails closed when ${probe.command} cannot be revalidated`, (t) => {
+    const tempDir = createTempRepo();
+    t.after(() => cleanupTempRepo(tempDir));
+    commitFixableJson(tempDir, "history-revalidation", "history check");
+    const originalHead = run(
+      "git",
+      ["rev-parse", "HEAD"],
+      tempDir,
+    ).stdout.trim();
+    const env = failMatchingGitAfterEnv(tempDir, probe.command, 1);
+
+    const result = runCommitFix(tempDir, { env });
+
+    assert.equal(result.status, 1);
+    assert.match(`${result.stdout}${result.stderr}`, probe.message);
+    assert.equal(
+      run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+      originalHead,
+    );
+  });
+}
 
 test("fails closed when the worktree cannot be revalidated", (t) => {
   const tempDir = createTempRepo();
@@ -743,6 +1134,37 @@ test("refuses when HEAD moves before the amend", async (t) => {
     "concurrent head",
   );
 });
+
+for (const attachmentChange of ["detached HEAD", "another branch"]) {
+  test(`refuses when HEAD moves to ${attachmentChange} at the same commit`, async (t) => {
+    const tempDir = createTempRepo();
+    t.after(() => cleanupTempRepo(tempDir));
+    prepareBlockingCommit(tempDir);
+    const originalHead = run(
+      "git",
+      ["rev-parse", "HEAD"],
+      tempDir,
+    ).stdout.trim();
+
+    const result = await runCommitFixDuringPrettier(tempDir, () => {
+      const switched =
+        attachmentChange === "detached HEAD"
+          ? run("git", ["switch", "--detach", "HEAD"], tempDir)
+          : run("git", ["switch", "-c", "concurrent-branch"], tempDir);
+      assert.equal(switched.status, 0, switched.stderr);
+    });
+
+    assert.equal(result.status, 1);
+    assert.match(
+      `${result.stdout}${result.stderr}`,
+      /Repository state changed while automatic fixes/,
+    );
+    assert.equal(
+      run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+      originalHead,
+    );
+  });
+}
 
 test("refuses a publication during the run with the fun tone", async (t) => {
   const tempDir = createTempRepo();

@@ -87,6 +87,133 @@ export function buildConcurrentFixRefusalMessage({
   };
 }
 
+/**
+ * Build a refusal for commit history that cannot be amended safely.
+ * @param {{reason: "detached"|"inspection"|"retained"|"signed", tone?: string, references?: string[], rerunCommand?: string}} options - History state and presentation context.
+ * @returns {{severity: "error", lines: string[]}} Box model.
+ */
+export function buildCommitFixHistoryRefusalMessage({
+  reason,
+  tone = "standard",
+  references = [],
+  rerunCommand = "npm run commit:fix",
+}) {
+  const fun = normalizeTone(tone) === "fun";
+
+  if (reason === "detached") {
+    return {
+      severity: "error",
+      lines: [
+        pc.bold(
+          fun
+            ? "This commit has no branch to come home to."
+            : "Cannot amend a detached commit.",
+        ),
+        "",
+        pc.dim(
+          fun
+            ? "A replacement could end up living only in Git's reflog."
+            : "The latest commit is not attached to a local branch. Amending it",
+        ),
+        ...(fun
+          ? []
+          : [
+              pc.dim(
+                "could leave the replacement reachable only through Git's reflog.",
+              ),
+            ]),
+        pc.dim(
+          fun
+            ? "Give it a branch first, then try the relationship talk again:"
+            : "Switch to or create the branch that should own it, then try again:",
+        ),
+        "",
+        `  ${pc.bold(escapeTerminalText(rerunCommand))}`,
+      ],
+    };
+  }
+
+  if (reason === "signed") {
+    return {
+      severity: "error",
+      lines: [
+        pc.bold(
+          fun
+            ? "This signed commit deserves a proper second ceremony."
+            : "Cannot automatically amend a signed commit.",
+        ),
+        "",
+        pc.dim(
+          fun
+            ? "A casual amend would replace it without an explicitly approved signature."
+            : "Automatic amend would replace it without an explicitly approved",
+        ),
+        ...(fun ? [] : [pc.dim("signature.")]),
+        pc.dim(
+          fun
+            ? "Apply the fixes manually, then sign the new commitment yourself."
+            : "Apply fixes manually, then use your normal signed-amend workflow.",
+        ),
+        pc.dim("No index or history was changed."),
+      ],
+    };
+  }
+
+  if (reason === "retained") {
+    const referenceSummary =
+      references.length > 0
+        ? escapeTerminalText(shortFileList(references, 3))
+        : "a tag or remote-tracking ref";
+    return {
+      severity: "error",
+      lines: [
+        pc.bold(
+          fun
+            ? "The latest commit is already seeing another Git ref."
+            : "The latest commit is retained by a protected Git reference.",
+        ),
+        "",
+        pc.dim(
+          fun
+            ? "That reference keeps the original history, even if HEAD moves on."
+            : "A local tag or locally known remote ref already contains it:",
+        ),
+        "",
+        `  ${referenceSummary}`,
+        "",
+        pc.dim(
+          fun
+            ? "Keep the history uncomplicated: make a new commit with the fixes."
+            : "Make a new commit with the fixes instead of rewriting this one.",
+        ),
+      ],
+    };
+  }
+
+  return {
+    severity: "error",
+    lines: [
+      pc.bold(
+        fun
+          ? "Git would not define this commit's relationship status."
+          : "Unable to prove the latest commit is safe to amend.",
+      ),
+      "",
+      pc.dim(
+        fun
+          ? "Nothing moved on while the history check was unavailable."
+          : "Amending rewrites history, so nothing was changed.",
+      ),
+      pc.dim(
+        fun
+          ? "Check HEAD, commit metadata, tags, and remote refs, then try again."
+          : "Check that Git can inspect HEAD, commit metadata, tags, and",
+      ),
+      ...(fun ? [] : [pc.dim("remote-tracking refs, then try again.")]),
+    ],
+  };
+}
+
 function funIssueMessage(issue, message) {
   const prettierMatch = issue.message.match(
     /^(\d+) file(s)? need Prettier formatting$/,

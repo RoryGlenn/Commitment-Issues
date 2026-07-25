@@ -112,8 +112,9 @@ discard files or force ref/history changes are outside this interface.
 
 - `doctor` verifies and repairs hook wiring.
 - `fix:staged` runs staged-file fixes against an exact repository snapshot.
-- `commit:fix` applies safe automatic fixes and amends the latest clean,
-  unpushed commit only while that snapshot remains current.
+- `commit:fix` applies safe automatic fixes and amends the latest clean commit
+  only while it stays attached to the same local branch, remains unsigned, and
+  is absent from local tags and remote-tracking refs.
 - `test:precommit` runs pre-commit checks directly.
 
 Both fix commands capture the initial `HEAD`, exact index-file identity and
@@ -130,14 +131,23 @@ Immediately before staging, the commands verify the same `HEAD`, index, and
 expected worktree bytes. Fixed content is hashed explicitly and a prepared
 index containing only those blobs is installed while holding Git's cooperative
 `index.lock`; `git add` never reads a concurrent worktree edit. `commit:fix`
-additionally verifies that no tracked worktree change appeared and that the
-original commit is still absent from remote-tracking branches both before
-staging and immediately before `git commit --amend`.
+additionally verifies that no tracked worktree change appeared, `HEAD` remains
+attached to the same local branch, the commit has no signature header, and the
+original commit is still absent from local tags and remote-tracking refs both
+before staging and immediately before `git commit --amend`.
 
 A detected edit, deletion, path-type replacement, index update, `HEAD` move,
-publication, lock conflict, or failed revalidation stops the command. It does
-not stage ambiguous bytes or amend a different commit. Concurrent user state
-remains available for review with `git status`.
+branch-attachment change, newly known protected ref, lock conflict, or failed
+revalidation stops the command. It does not stage ambiguous bytes or amend a
+different commit. Concurrent user state remains available for review with
+`git status`.
+
+This publication check is an offline local-snapshot contract. It covers every
+local tag and locally available remote-tracking ref. A tag or custom ref that
+exists only on a remote is not observable without network access, so
+`commit:fix` neither contacts the remote nor claims proof about those unseen
+refs. Fetch before running the command when the local ref snapshot must include
+new remote state.
 
 ## Setup removed by `uninstall`
 

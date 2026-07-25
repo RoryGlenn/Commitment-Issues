@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import {
   buildAdvisoryMessage,
+  buildCommitFixHistoryRefusalMessage,
   buildConcurrentFixRefusalMessage,
 } from "../scripts/lib/message.mjs";
 import {
@@ -261,4 +262,31 @@ test("fun tone rewrites concurrent fixer refusals", () => {
     amended.lines.join("\n"),
     /latest commit was left out of the drama/i,
   );
+});
+
+test("fun tone rewrites every commit-fix history refusal", () => {
+  const messages = {
+    detached: buildCommitFixHistoryRefusalMessage({
+      reason: "detached",
+      tone: "fun",
+    }).lines.join("\n"),
+    signed: buildCommitFixHistoryRefusalMessage({
+      reason: "signed",
+      tone: "fun",
+    }).lines.join("\n"),
+    retained: buildCommitFixHistoryRefusalMessage({
+      reason: "retained",
+      tone: "fun",
+      references: ["refs/tags/reviewed"],
+    }).lines.join("\n"),
+    inspection: buildCommitFixHistoryRefusalMessage({
+      reason: "inspection",
+      tone: "fun",
+    }).lines.join("\n"),
+  };
+
+  assert.match(messages.detached, /no branch to come home to/i);
+  assert.match(messages.signed, /proper second ceremony/i);
+  assert.match(messages.retained, /already seeing another Git ref/i);
+  assert.match(messages.inspection, /relationship status/i);
 });

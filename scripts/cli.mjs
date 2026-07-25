@@ -131,7 +131,7 @@ const COMMANDS = {
     visibility: "primary",
     group: "Fixes",
     order: 1,
-    summary: "Safely fix and amend the latest unpushed commit",
+    summary: "Safely amend an attached commit using local ref checks",
     usage: "commit-fix",
     options: [],
   },

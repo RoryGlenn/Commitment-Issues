@@ -237,7 +237,7 @@
       <circle class="icon" cx="91" cy="30" r="16" stroke="#d4640a"/>
       <path class="icon" stroke="#d4640a" d="M98 22a6 6 0 0 0-8 6l-7 7 3.5 3.5 7-7a6 6 0 0 0 6-8l-3.5 3.5-3-3z"/>
       <text class="hd" x="91" y="68" text-anchor="middle" font-size="12">npm run commit:fix</text>
-      <text class="bd" x="91" y="94" text-anchor="middle">latest unpushed commit</text>
+      <text class="bd" x="91" y="94" text-anchor="middle">latest eligible commit</text>
       <text class="bd" x="91" y="116" text-anchor="middle">requires clean tree</text>
       <text class="bd" x="91" y="138" text-anchor="middle">amends safely</text>
     </g>

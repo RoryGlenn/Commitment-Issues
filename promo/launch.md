@@ -91,8 +91,9 @@ The fix commands refuse to do anything risky:
 
 - `fix:staged` only touches staged files, and refuses to run when a file has both
   staged and unstaged changes.
-- `commit:fix` refuses dirty tracked worktrees and commits found in local remote
-  refs, protecting unstaged work and known pushed history.
+- `commit:fix` refuses dirty tracked worktrees, detached or signed commits, and
+  commits found in local tags or known remote refs, protecting unstaged work
+  and the history visible in the offline ref snapshot.
 
 Nothing mutates your work behind your back.
 

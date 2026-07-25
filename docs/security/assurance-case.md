@@ -159,7 +159,8 @@ The project combines local validation, tests, linting, formatting, CI on multipl
   tree, with the documented limitation that deliberately detached descendants
   are outside the portable cleanup boundary.
 - `fix:staged` refuses partially staged files, and `commit:fix` refuses dirty
-  tracked worktrees or pushed commits.
+  tracked worktrees, detached or signed commits, and commits retained by local
+  tags or known remote refs.
 - Path normalization and Git parsing cover POSIX and Windows-style separators,
   spaces, tabs, newlines, quotes, shell metacharacters, leading hyphens,
   Unicode, and diff content that resembles metadata.

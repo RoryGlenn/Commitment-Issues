@@ -7,6 +7,7 @@ import {
   advisoryTestFailureWarning,
   appendPushWarnings,
   buildAdvisoryMessage,
+  buildCommitFixHistoryRefusalMessage,
   buildCommitMessageCheckMessage,
   buildConcurrentFixRefusalMessage,
   buildPushAllowedMessage,
@@ -41,6 +42,42 @@ test("concurrent fixer refusals distinguish staging from amending", () => {
   assert.match(staged.lines.join("\n"), /npm run fix:staged/);
   assert.match(amended.lines.join("\n"), /latest commit was not amended/i);
   assert.match(amended.lines.join("\n"), /npm run commit:fix/);
+});
+
+test("commit-fix history refusals explain each fail-closed state", () => {
+  const detached = buildCommitFixHistoryRefusalMessage({
+    reason: "detached",
+    rerunCommand: "pnpm run commit:fix",
+  });
+  const signed = buildCommitFixHistoryRefusalMessage({ reason: "signed" });
+  const retained = buildCommitFixHistoryRefusalMessage({
+    reason: "retained",
+    references: [
+      "refs/remotes/origin/main",
+      "refs/tags/v1.0.0",
+      "refs/tags/v1.0.1",
+      "refs/tags/v1.0.2",
+    ],
+  });
+  const retainedWithoutDetails = buildCommitFixHistoryRefusalMessage({
+    reason: "retained",
+  });
+  const unavailable = buildCommitFixHistoryRefusalMessage({
+    reason: "inspection",
+  });
+
+  assert.equal(detached.severity, "error");
+  assert.match(detached.lines.join("\n"), /detached commit/);
+  assert.match(detached.lines.join("\n"), /pnpm run commit:fix/);
+  assert.match(signed.lines.join("\n"), /signed commit/);
+  assert.match(signed.lines.join("\n"), /No index or history was changed/);
+  assert.match(retained.lines.join("\n"), /refs\/remotes\/origin\/main/);
+  assert.match(retained.lines.join("\n"), /\(\+1 more\)/);
+  assert.match(
+    retainedWithoutDetails.lines.join("\n"),
+    /a tag or remote-tracking ref/,
+  );
+  assert.match(unavailable.lines.join("\n"), /safe to amend/);
 });
 
 test("advisory input normalization accepts omitted and legacy context shapes", () => {

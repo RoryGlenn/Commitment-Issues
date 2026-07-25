@@ -115,9 +115,10 @@ npm run commit:fix
 ```
 
 `fix:staged` refuses files with overlapping staged and unstaged changes.
-`commit:fix` refuses dirty tracked worktrees, pushed commits, and repository
-states it cannot inspect safely. Resolve the condition named in the refusal and
-retry; do not bypass a safety check merely to force an amend.
+`commit:fix` refuses dirty tracked worktrees, detached or signed commits,
+commits retained by local tags or known remote refs, and repository states it
+cannot inspect safely. Resolve the condition named in the refusal and retry; do
+not bypass a safety check merely to force an amend.
 
 ## I think I made a Git mistake. Where should I start?
 
@@ -342,8 +343,10 @@ that behavior. Rules enforced by a Git hosting service are separate.
 
 To **amend** is to replace the latest commit with a new version instead of
 adding another commit. The commit's identifier changes. `npm run commit:fix`
-amends only when the latest commit is unpushed and the tracked working tree is
-safe; otherwise it refuses.
+amends only when the latest commit is attached, unsigned, absent from locally
+known protected refs, and the tracked working tree is safe; otherwise it
+refuses. The check stays offline, so fetch first if the local remote-tracking
+snapshot needs to include newer remote refs.
 
 ### Detached HEAD
 

@@ -523,7 +523,9 @@ without changing the result: `Commit message sent mixed signals`,
   <img src="../assets/commit-fix-success.svg" alt="Success output showing the latest commit amended with automatic fixes" width="590">
 </p>
 
-Shown after `npm run commit:fix` safely applies automatic fixes and amends the latest clean, unpushed commit.
+Shown after `npm run commit:fix` safely applies automatic fixes and amends the
+latest clean, attached, unsigned commit whose local ref snapshot permits the
+rewrite.
 
 ### Latest commit amended with available fixes
 
@@ -557,13 +559,46 @@ Shown when the fixers ran but produced no changes while issues remain (for examp
 
 Shown when the automatic fixes reverted the only changes in the latest commit, so amending would create an empty commit; drop it with `git reset --soft HEAD^`.
 
-### Already-pushed refusal
+### Protected-reference refusal
 
 <p>
-  <img src="../assets/commit-fix-already-pushed.svg" alt="Error output refusing to amend a commit that has already been pushed" width="786">
+  <img src="../assets/commit-fix-protected-reference.svg" alt="Error output refusing to amend a commit retained by a local tag or known remote ref" width="757">
 </p>
 
-Shown when the latest commit exists on a remote branch. `commit:fix` never rewrites published history.
+Shown when a local tag or remote-tracking ref contains the latest commit. The
+command lists the locally known ref and asks for a new fix commit instead. Its
+offline proof does not contact remotes or claim knowledge of remote-only refs.
+
+The fun-tone title is
+`The latest commit is already seeing another Git ref`; it keeps the same
+protected-history refusal.
+
+### Detached-commit refusal
+
+<p>
+  <img src="../assets/commit-fix-detached.svg" alt="Error output refusing to amend a detached commit" width="788">
+</p>
+
+Shown when `HEAD` is detached or points outside `refs/heads/`. The command asks
+the user to switch to or create the branch that should retain the replacement,
+preventing an amended commit from becoming reachable only through the reflog.
+
+The fun-tone title is `This commit has no branch to come home to`; it does not
+change the refusal.
+
+### Signed-commit refusal
+
+<p>
+  <img src="../assets/commit-fix-signed.svg" alt="Error output refusing to replace a signed commit without an explicit signing workflow" width="778">
+</p>
+
+Shown when the raw commit carries a Git `gpgsig` or `gpgsig-sha256` header,
+including OpenPGP and SSH signatures. Automatic amend stops before staging so
+it cannot silently replace the signed commit with an unsigned one.
+
+The fun-tone title is
+`This signed commit deserves a proper second ceremony`; manual signed amend
+remains the required recovery.
 
 ### Dirty worktree refusal
 
@@ -573,13 +608,15 @@ Shown when the latest commit exists on a remote branch. `commit:fix` never rewri
 
 Shown when tracked files have uncommitted changes; commit, stash, or discard them before amending.
 
-### Unpushed status unverifiable
+### Commit history safety unverifiable
 
 <p>
-  <img src="../assets/commit-fix-unverified.svg" alt="Error output refusing to amend because Git could not confirm the commit is unpushed" width="737">
+  <img src="../assets/commit-fix-unverified.svg" alt="Error output refusing to amend because Git could not inspect branch attachment, commit metadata, tags, or known remote refs" width="716">
 </p>
 
-Shown when Git cannot list remote branches. The command fails closed rather than assume the commit is safe to rewrite.
+Shown when Git cannot inspect branch attachment, commit metadata, local tags, or
+remote-tracking refs. The command fails closed rather than assume the commit is
+safe to rewrite.
 
 ### No commit to inspect
 
@@ -604,8 +641,9 @@ Shown when the latest commit contains no files the staged fixers handle.
 </p>
 
 Shown when revalidation detects that a target was edited, deleted, or replaced,
-the index changed, `HEAD` moved, or the original commit became published while
-tools ran. The command preserves the concurrent state and does not amend.
+the index changed, `HEAD` moved, or a local tag or known remote-tracking ref
+began retaining the original commit while tools ran. The command preserves the
+concurrent state and does not amend.
 
 The fun-tone title is
 `The repository changed the relationship status mid-fix`; it says the latest

@@ -112,7 +112,7 @@ test("normal mode still writes the full generated gallery", (t) => {
   assert.match(result.stdout, /\ndone\n?$/);
 
   const generated = galleryFiles(tempDir);
-  assert.equal(generated.length, 66);
+  assert.equal(generated.length, 68);
   for (const name of generated) {
     assert.deepEqual(
       fs.readFileSync(path.join(tempDir, "assets", name)),

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="757" height="244" viewBox="0 0 757 244" role="img" aria-labelledby="title desc">
+  <title id="title">Commit retained by protected reference terminal output</title>
+  <desc id="desc">A terminal-style error box refusing to amend a commit retained by a local tag or known remote ref.</desc>
+  <rect width="757" height="244" rx="8" ry="8" fill="#181818"/>
+  <g transform="translate(20 24)">
+    <rect x="0" y="0" width="717" height="200" rx="5" ry="5" fill="none" stroke="#ff5f7a" stroke-width="1.3"/>
+    <rect x="321.5" y="-10" width="74" height="20" fill="#181818"/>
+    <text x="358.5" y="5" fill="#ff5f7a" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="18" font-weight="700">error</text>
+    <text x="34" y="44" fill="#ff5f7a" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="18" font-weight="700">The latest commit is retained by a protected Git reference.</text>
+    <text x="34" y="88" fill="#858b91" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="17">A local tag or locally known remote ref already contains it:</text>
+    <text x="54" y="132" fill="#858b91" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="17">refs/remotes/origin/main</text>
+    <text x="34" y="176" fill="#858b91" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="17">Make a new commit with the fixes instead of rewriting this one.</text>
+  </g>
+</svg>

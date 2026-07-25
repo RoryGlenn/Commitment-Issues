@@ -231,7 +231,8 @@ made absolute so Node cannot interpret a repository filename as an option.
   uses bounded tool concurrency under one shared timeout, revalidates
   repository state, and stages only attributable output.
 - `npm run commit:fix` uses the same bounded fix transaction on the latest
-  clean commit and amends it in place.
+  clean commit only when `HEAD` stays on one local branch, the commit is
+  unsigned, and no local tag or remote-tracking ref contains it.
 
 ## TypeScript and mixed projects
 
@@ -584,8 +585,9 @@ Recognized keys with the wrong value type (for example a string where a boolean 
   the concurrent-state transaction and stages exact output blobs.
 - `scripts/fix-staged-js.mjs` — file-list fixer task: ESLint fix followed by Prettier write.
 - `scripts/commit-fix.mjs` — applies automatic fixes to the latest clean,
-  unpushed commit and amends only after final repository and publication
-  revalidation.
+  attached, unsigned commit and amends only after final repository, branch,
+  tag, and remote-tracking-ref revalidation. The proof is offline and does not
+  inspect refs that exist only on a remote.
 - `scripts/lib/` — shared helpers for UI, spawning, file heuristics, output parsing, advisory messages, and config loading.
 
 ## Continuous integration

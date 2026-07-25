@@ -655,7 +655,13 @@ export function spawnAsync(command, args, options = {}) {
         });
         return;
       }
-      finish({ error: spawnError, status, signal, stdout, stderr });
+      finish({
+        error: spawnError,
+        status: spawnError ? null : status,
+        signal: spawnError ? null : signal,
+        stdout,
+        stderr,
+      });
     });
   });
 }

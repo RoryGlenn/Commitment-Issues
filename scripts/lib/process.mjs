@@ -9,11 +9,21 @@ import { loadPrecommitConfig, MAX_TIMEOUT_MS } from "./config.mjs";
 // Default ceiling for any tool the hooks spawn, so a hung tool can never wedge a
 // commit indefinitely. Override with precommitChecks.timeoutMs (positive number
 // no greater than Node's maximum timer delay).
-const configuredTimeout = Number(loadPrecommitConfig().timeoutMs);
-export const TOOL_TIMEOUT_MS =
-  Number.isFinite(configuredTimeout) && configuredTimeout > 0
+export const DEFAULT_TOOL_TIMEOUT_MS = 120000;
+
+/**
+ * Resolve the configured tool deadline when a command is ready to run. Keeping
+ * this lazy lets entrypoints anchor cwd to the owning worktree before config is
+ * read, while help and version output stay free of repository probes.
+ * @param {string} [cwd] - Project root containing the configuration.
+ * @returns {number} Positive timeout in milliseconds.
+ */
+export function toolTimeoutMs(cwd = process.cwd()) {
+  const configuredTimeout = Number(loadPrecommitConfig(cwd).timeoutMs);
+  return Number.isFinite(configuredTimeout) && configuredTimeout > 0
     ? configuredTimeout
-    : 120000;
+    : DEFAULT_TOOL_TIMEOUT_MS;
+}
 
 // Keep argv comfortably below the launchers supported by the project. Windows
 // uses UTF-16 command-line units and must leave room for cross-spawn's `.cmd`
@@ -244,6 +254,48 @@ export function withoutGitLocalEnvironment(environment = process.env) {
     }
   }
   return sanitized;
+}
+
+function stripPathRecordTerminator(output) {
+  const value = String(output || "");
+  return value.endsWith("\r\n")
+    ? value.slice(0, -2)
+    : value.endsWith("\n")
+      ? value.slice(0, -1)
+      : value;
+}
+
+/**
+ * Resolve the non-bare worktree that owns a directory. Git-local routing
+ * variables are removed so cwd, including a nested repository or worktree,
+ * remains authoritative.
+ * @param {string} [cwd] - Directory whose owning worktree should be resolved.
+ * @param {NodeJS.ProcessEnv} [environment] - Environment for the Git probe.
+ * @returns {string|null} Absolute worktree root, or null outside a worktree.
+ */
+export function resolveWorktreeRoot(
+  cwd = process.cwd(),
+  environment = process.env,
+) {
+  const result = run(
+    "git",
+    ["-c", "core.quotePath=false", "rev-parse", "--show-toplevel"],
+    { cwd, env: withoutGitLocalEnvironment(environment) },
+  );
+  if (result.error || result.status !== 0) return null;
+  const root = stripPathRecordTerminator(result.stdout);
+  return root && !root.includes("\0") ? path.resolve(cwd, root) : null;
+}
+
+/**
+ * Make repository-relative config, paths, tools, and child cwd deterministic
+ * for a runtime command launched anywhere inside its owning worktree.
+ * @returns {string|null} The entered root, or null when cwd is not a worktree.
+ */
+export function enterWorktreeRoot() {
+  const root = resolveWorktreeRoot();
+  if (root) process.chdir(root);
+  return root;
 }
 
 /**
@@ -559,7 +611,7 @@ export function spawnAsync(command, args, options = {}) {
   const {
     echo = false,
     input,
-    timeoutMs = TOOL_TIMEOUT_MS,
+    timeoutMs = toolTimeoutMs(),
     ...spawnOptions
   } = options;
   return new Promise((resolve) => {
@@ -733,7 +785,7 @@ export async function spawnArgumentBatches(command, batches, options = {}) {
   const {
     beforeBatch,
     afterBatch,
-    timeoutMs = TOOL_TIMEOUT_MS,
+    timeoutMs = toolTimeoutMs(),
     ...spawnOptions
   } = options;
   const startedAt = Date.now();

@@ -23,11 +23,12 @@ import {
 } from "./helpers/temp-repo.mjs";
 
 function runFixStaged(tempDir, options = {}) {
+  const { cwd = tempDir, ...runOptions } = options;
   return run(
     "node",
     [path.join(tempDir, "scripts", "fix-staged.mjs")],
-    tempDir,
-    options,
+    cwd,
+    runOptions,
   );
 }
 
@@ -202,6 +203,24 @@ test("applies staged fixes successfully when all issues are auto-fixable", (t) =
   assert.equal(result.status, 0);
   assert.match(output, /Staged fixes applied\./);
   assert.equal(readFile(tempDir, "src/success.js"), 'console.log("x");\n');
+});
+
+test("fix-staged resolves staged root paths from a subdirectory", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  writeFile(path.join(tempDir, "src", "nested.json"), '{"nested":true}\n');
+  run("git", ["add", "src/nested.json"], tempDir);
+  const nested = path.join(tempDir, "nested path", "deeper");
+  fs.mkdirSync(nested, { recursive: true });
+
+  const result = runFixStaged(tempDir, { cwd: nested });
+
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  assert.equal(readFile(tempDir, "src/nested.json"), '{ "nested": true }\n');
+  assert.equal(
+    run("git", ["show", ":src/nested.json"], tempDir).stdout,
+    '{ "nested": true }\n',
+  );
 });
 
 test("fix-staged breaks a target hardlink without changing external bytes", (t) => {

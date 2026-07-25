@@ -9,7 +9,7 @@ import {
   readMutableProjectFile,
   writeMutableProjectFile,
 } from "./files.mjs";
-import { run, runTool, TOOL_TIMEOUT_MS } from "./process.mjs";
+import { run, runTool, toolTimeoutMs } from "./process.mjs";
 
 const GIT_PATH_ARGS = ["-c", "core.quotePath=false"];
 const REGULAR_INDEX_MODES = new Set(["100644", "100755"]);
@@ -409,7 +409,7 @@ export async function runFixTools(
     concurrency = FIX_TOOL_CONCURRENCY,
     now = Date.now,
     runToolCommand = runTool,
-    timeoutMs = TOOL_TIMEOUT_MS,
+    timeoutMs = toolTimeoutMs(),
   } = {},
 ) {
   const outputs = new Map(

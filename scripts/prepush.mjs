@@ -19,7 +19,8 @@ import {
   nodeTestArguments,
   run,
   runBatchedCommand,
-  TOOL_TIMEOUT_MS,
+  enterWorktreeRoot,
+  toolTimeoutMs,
   withoutGitLocalEnvironment,
 } from "./lib/process.mjs";
 import {
@@ -45,6 +46,9 @@ import {
 } from "./lib/json-output.mjs";
 import { firstPushBase } from "./lib/push-base.mjs";
 import { escapeTerminalText } from "./lib/terminal.mjs";
+
+enterWorktreeRoot();
+const TOOL_TIMEOUT_MS = toolTimeoutMs();
 // Force literal, unquoted paths (as the pre-commit/fix flows already do) so
 // pushed files with spaces or non-ASCII names still match their associated
 // tests instead of arriving octal-escaped from git.

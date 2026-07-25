@@ -24,9 +24,10 @@ import {
 } from "./helpers/temp-repo.mjs";
 
 function runPrePush(tempDir, input = "", options = {}) {
-  return run("node", [path.join(tempDir, "scripts", "prepush.mjs")], tempDir, {
+  const { cwd = tempDir, ...runOptions } = options;
+  return run("node", [path.join(tempDir, "scripts", "prepush.mjs")], cwd, {
     input,
-    ...options,
+    ...runOptions,
   });
 }
 
@@ -507,6 +508,36 @@ test("normal preserves the successful pre-push summary box", (t) => {
   assert.equal(result.status, 0);
   assert.equal(countTerminalBoxes(output), 1);
   assert.match(output, /All tests passed/);
+});
+
+test("prepush uses root config, paths, and child cwd from a subdirectory", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const marker = path.join(tempDir, "prepush-cwd.txt");
+  writeFile(
+    path.join(tempDir, "record-cwd.mjs"),
+    'import fs from "node:fs";\n' +
+      "fs.writeFileSync(process.env.PREPUSH_CWD_MARKER, process.cwd());\n",
+  );
+  setConfig(tempDir, {
+    blockPushOnTestFailure: true,
+    protectedBranches: [],
+    testCommand: ["node", "record-cwd.mjs"],
+  });
+  commitWidget(tempDir, 1);
+  const nested = path.join(tempDir, "nested path", "deeper");
+  fs.mkdirSync(nested, { recursive: true });
+
+  const result = runPrePush(tempDir, pushInput(tempDir), {
+    cwd: nested,
+    env: { ...process.env, PREPUSH_CWD_MARKER: marker },
+  });
+
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  assert.equal(
+    fs.realpathSync(path.resolve(readFile(tempDir, "prepush-cwd.txt"))),
+    fs.realpathSync(tempDir),
+  );
 });
 
 test("blocks the push when the test command cannot run", (t) => {

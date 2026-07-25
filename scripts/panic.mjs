@@ -2,7 +2,11 @@
 // Copyright (c) 2026 RoryGlenn and commitment-issues contributors
 // SPDX-License-Identifier: MIT
 
-import { run, withoutGitLocalEnvironment } from "./lib/process.mjs";
+import {
+  enterWorktreeRoot,
+  run,
+  withoutGitLocalEnvironment,
+} from "./lib/process.mjs";
 import { printBoxModel } from "./lib/ui.mjs";
 import {
   buildPanicGuide,
@@ -23,6 +27,7 @@ if (args.length > 0) {
   process.exit(1);
 }
 
+enterWorktreeRoot();
 const gitEnvironment = {
   ...withoutGitLocalEnvironment(),
   GIT_OPTIONAL_LOCKS: "0",

@@ -594,6 +594,7 @@ test("panic invokes only allowlisted read-only Git probes", (t) => {
   const prefix = "--no-pager --no-optional-locks -c core.quotePath=false ";
   const invocations = fs.readFileSync(logPath, "utf8").trim().split(/\r?\n/);
   assert.deepEqual(invocations, [
+    "-c core.quotePath=false rev-parse --show-toplevel",
     `${prefix}rev-parse --is-inside-work-tree`,
     `${prefix}status --porcelain=v1 -z --untracked-files=all`,
     `${prefix}symbolic-ref --quiet --short HEAD`,

@@ -75,6 +75,12 @@ Shown when `init` is re-run, finds nothing to change, and verifies that every co
 
 Shown when `init` (or interactive `doctor`) runs outside a project root.
 
+### Project root required
+
+`Project root required.` is shown when `init`, interactive `doctor`, or
+`uninstall` is launched from below the owning worktree root. The command names
+that root and exits before changing or repairing anything.
+
 ### Invalid package.json
 
 <p>

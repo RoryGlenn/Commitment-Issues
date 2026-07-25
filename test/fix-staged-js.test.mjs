@@ -13,11 +13,13 @@ import {
   writeFile,
 } from "./helpers/temp-repo.mjs";
 
-function runFixStagedJs(tempDir, files) {
+function runFixStagedJs(tempDir, files, options = {}) {
+  const { cwd = tempDir, ...runOptions } = options;
   return run(
     "node",
     [path.join(tempDir, "scripts", "fix-staged-js.mjs"), ...files],
-    tempDir,
+    cwd,
+    runOptions,
   );
 }
 
@@ -56,6 +58,21 @@ test("formats a TypeScript file and exits 0 when auto-fixable", (t) => {
 
   assert.equal(result.status, 0);
   assert.equal(readFile(tempDir, "src/fixme.ts"), "export const x = 1;\n");
+});
+
+test("preserves caller-relative file arguments below the root", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const nested = path.join(tempDir, "nested path");
+  writeFile(path.join(nested, "fixme.js"), "export const x=1;\n");
+
+  const result = runFixStagedJs(tempDir, ["fixme.js"], { cwd: nested });
+
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  assert.equal(
+    readFile(tempDir, "nested path/fixme.js"),
+    "export const x = 1;\n",
+  );
 });
 
 test("exits 0 immediately when given no file arguments", (t) => {

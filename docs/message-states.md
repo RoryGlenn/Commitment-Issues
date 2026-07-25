@@ -128,11 +128,12 @@ existing ignore path. The write-failure titles are:
 These cover permission/preflight and unexpected write failures. The states stop
 before hook installation or removal begins. Replacement bytes are completed,
 permissioned, synced, and closed under a reserved same-directory transaction
-name before the inspected destination is replaced. A failure therefore leaves
-each project file as either its complete old version or its complete intended
-version, never empty or partial. In a multi-file setup, an earlier complete
-replacement may already have committed before a later file fails, but hook
-state is still untouched.
+name, then revalidated byte-for-byte through a no-follow descriptor before the
+inspected destination is replaced. A failure therefore leaves each project file
+as either its complete old version or its complete intended version, never
+empty or partial. In a multi-file setup, an earlier complete replacement may
+already have committed before a later file fails, but hook state is still
+untouched.
 
 Rerun the same command after fixing storage or permissions. The retry completes
 remaining work and removes regular transaction files left by a writer process

@@ -311,11 +311,12 @@ production-readiness workstream #130 is consolidated in the
   composition evidence. Unit/fixture: `test/hooks.test.mjs`,
   `test/init.test.mjs`.
 - **INIT-036** — package, standalone-configuration, and gitignore replacements
-  stage complete bytes before commit. Short, failed, unsynced, unclosed, or
+  stage complete bytes and verify them byte-for-byte through a no-follow
+  descriptor before commit. Short, failed, unsynced, unclosed, changed, or
   uncommitted writes preserve complete old bytes; forced termination across
   every staging phase leaves complete old or new content, retries remove only
-  dead-writer transaction files, concurrent readers never parse a partial file,
-  original permission bits survive, and hooks remain untouched until all
+  dead-writer transaction files, concurrent readers never parse a partial
+  file, original permission bits survive, and hooks remain untouched until all
   required project-file writes complete. Unit/subprocess:
   `test/lib-files.test.mjs`, `test/init.test.mjs`.
 

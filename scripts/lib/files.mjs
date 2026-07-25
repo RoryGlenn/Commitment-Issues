@@ -756,9 +756,37 @@ export function writeMutableProjectFile(state, content) {
     const stagedPath = inspectMutableProjectFile(temporaryPath);
     if (
       stagedPath.status !== "regular" ||
-      !sameProjectFileIdentity(staged, stagedPath.stats) ||
-      !mutableProjectFileUnchanged(expectedState)
+      !sameOpenFileIdentity(staged, stagedPath.stats)
     ) {
+      throw projectFileChangedError(state.filePath);
+    }
+    let verificationDescriptor;
+    try {
+      try {
+        verificationDescriptor = fs.openSync(
+          temporaryPath,
+          fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW,
+        );
+      } catch (error) {
+        if (["ELOOP", "ENOENT", "ENOTDIR"].includes(error?.code)) {
+          throw projectFileChangedError(state.filePath);
+        }
+        throw error;
+      }
+      const verified = fs.fstatSync(verificationDescriptor, { bigint: true });
+      if (
+        !verified.isFile() ||
+        !sameOpenFileIdentity(staged, verified) ||
+        !fs.readFileSync(verificationDescriptor).equals(contentBuffer)
+      ) {
+        throw projectFileChangedError(state.filePath);
+      }
+    } finally {
+      if (verificationDescriptor !== undefined) {
+        fs.closeSync(verificationDescriptor);
+      }
+    }
+    if (!mutableProjectFileUnchanged(expectedState)) {
       throw projectFileChangedError(state.filePath);
     }
 

@@ -953,6 +953,42 @@ test("mutable project file writes reject a replaced staging path", (t) => {
   assert.equal(fs.readFileSync(outside, "utf8"), outsideContent);
 });
 
+for (const failure of [
+  {
+    code: "ELOOP",
+    expectedCode: "ESTALE",
+    name: "a staging path replaced during reopen",
+  },
+  { code: "EACCES", expectedCode: "EACCES", name: "a staging reopen error" },
+]) {
+  test(`mutable project file writes reject ${failure.name}`, (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mutable-stage-reopen-"));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const file = path.join(dir, "package.json");
+    const originalContent = '{"sentinel":"original"}\n';
+    fs.writeFileSync(file, originalContent);
+    const state = inspectMutableProjectFile(file);
+    const originalOpen = fs.openSync;
+    let stageOpens = 0;
+    t.mock.method(fs, "openSync", (filePath, ...args) => {
+      if (String(filePath).includes(".commitment-issues-")) {
+        stageOpens += 1;
+        if (stageOpens === 2) {
+          throw filesystemError(failure.code);
+        }
+      }
+      return originalOpen(filePath, ...args);
+    });
+
+    assert.throws(
+      () => writeMutableProjectFile(state, '{"sentinel":"replacement"}\n'),
+      (error) => error.code === failure.expectedCode,
+    );
+    assert.equal(fs.readFileSync(file, "utf8"), originalContent);
+    assert.deepEqual(mutableProjectFileArtifacts(dir, "package.json"), []);
+  });
+}
+
 test("mutable project file writes reject in-place staging changes after close", (t) => {
   const dir = fs.mkdtempSync(
     path.join(os.tmpdir(), "mutable-stage-content-race-"),

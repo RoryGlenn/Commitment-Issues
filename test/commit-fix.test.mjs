@@ -446,6 +446,48 @@ for (const header of ["gpgsig", "gpgsig-sha256"]) {
   });
 }
 
+test("inspects signed commit metadata without replacement objects", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  commitFixableJson(tempDir, "replace-hidden-signature", "signed target");
+  const unsignedReplacement = run(
+    "git",
+    ["rev-parse", "HEAD"],
+    tempDir,
+  ).stdout.trim();
+  const signedHead = addSyntheticSignatureHeader(tempDir, "gpgsig");
+  const replaced = run(
+    "git",
+    ["replace", signedHead, unsignedReplacement],
+    tempDir,
+  );
+  assert.equal(replaced.status, 0, replaced.stderr);
+  assert.doesNotMatch(
+    run("git", ["cat-file", "commit", signedHead], tempDir).stdout,
+    /gpgsig /u,
+  );
+  assert.match(
+    run(
+      "git",
+      ["--no-replace-objects", "cat-file", "commit", signedHead],
+      tempDir,
+    ).stdout,
+    /gpgsig /u,
+  );
+
+  const result = runCommitFix(tempDir);
+
+  assert.equal(result.status, 1);
+  assert.match(
+    `${result.stdout}${result.stderr}`,
+    /Cannot automatically amend a signed commit\./,
+  );
+  assert.equal(
+    run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+    signedHead,
+  );
+});
+
 test("refuses a real SSH-signed commit when Git supports SSH signing", (t) => {
   const tempDir = createTempRepo();
   t.after(() => cleanupTempRepo(tempDir));

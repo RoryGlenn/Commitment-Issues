@@ -63,7 +63,12 @@ function inspectCommitAmendSafety(head) {
     return { safe: false, reason: "retained", references };
   }
 
-  const commitResult = run("git", ["cat-file", "commit", head]);
+  const commitResult = run("git", [
+    "--no-replace-objects",
+    "cat-file",
+    "commit",
+    head,
+  ]);
   const headerEnd = commitResult.stdout.indexOf("\n\n");
   if (commitResult.status !== 0 || headerEnd === -1) {
     return { safe: false, reason: "inspection" };

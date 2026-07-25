@@ -42,6 +42,23 @@ function filesystemError(code) {
   return Object.assign(new Error(`injected ${code}`), { code });
 }
 
+function replaceProcessPropertyForTest(t, name, value) {
+  const original = Object.getOwnPropertyDescriptor(process, name);
+  Object.defineProperty(process, name, {
+    configurable: true,
+    enumerable: original?.enumerable ?? true,
+    writable: original?.writable ?? true,
+    value,
+  });
+  t.after(() => {
+    if (original) {
+      Object.defineProperty(process, name, original);
+    } else {
+      delete process[name];
+    }
+  });
+}
+
 function exitedChildPid() {
   const result = spawnSync(process.execPath, ["-e", ""]);
   assert.equal(result.status, 0);
@@ -527,7 +544,7 @@ test("mutable project file cleanup supports platforms without user IDs", (t) => 
   );
   fs.writeFileSync(file, '{"before":true}\n');
   fs.writeFileSync(artifact, "staged\n");
-  t.mock.property(process, "getuid", undefined);
+  replaceProcessPropertyForTest(t, "getuid", undefined);
 
   writeMutableProjectFile(inspectMutableProjectFile(file), '{"after":true}\n');
 
@@ -789,7 +806,7 @@ test("mutable project file writes skip unsupported directory sync on Windows", (
   const state = inspectMutableProjectFile(file);
   const originalSync = fs.fsyncSync;
   let syncCalls = 0;
-  t.mock.property(process, "platform", "win32");
+  replaceProcessPropertyForTest(t, "platform", "win32");
   t.mock.method(fs, "fsyncSync", (descriptor) => {
     syncCalls += 1;
     return originalSync(descriptor);

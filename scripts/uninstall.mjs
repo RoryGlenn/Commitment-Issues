@@ -25,7 +25,6 @@ import {
   inspectMutableProjectFile,
   preflightMutableProjectFile,
   removeMutableProjectFile,
-  removeOwnedPath,
   writeMutableProjectFile,
 } from "./lib/files.mjs";
 import {
@@ -296,7 +295,9 @@ if (!dryRun) {
       errorBox([
         pc.bold(`Could not update ${filePath}.`),
         "",
-        pc.dim("Make the project path writable, then run uninstall again."),
+        pc.dim(
+          "Make the project path and its directory writable, then run uninstall again.",
+        ),
         pc.dim("No files or hooks were changed."),
       ]);
       process.exit(1);
@@ -317,21 +318,29 @@ if (!dryRun) {
         pc.bold("Could not update package.json."),
         "",
         pc.dim("The filesystem write failed before hook cleanup began."),
-        pc.dim("Fix the project-file permissions, then rerun uninstall."),
+        pc.dim("Every project file remains a complete old or new version."),
+        pc.dim("Fix storage or permissions, then rerun uninstall safely."),
       ]);
       process.exit(1);
     }
     removed.push(...plannedPackageChanges);
   }
   if (standalone.exists) {
-    const cleanup = removeOwnedPath(
-      STANDALONE_CONFIG_FILE,
-      STANDALONE_CONFIG_FILE,
-      () =>
-        removeMutableProjectFile(projectFileStates.get(STANDALONE_CONFIG_FILE)),
-    );
-    removed.push(...cleanup.removed);
-    manualCleanup.push(...cleanup.manualCleanup);
+    try {
+      removeMutableProjectFile(projectFileStates.get(STANDALONE_CONFIG_FILE));
+    } catch {
+      errorBox([
+        pc.bold(`Could not remove ${STANDALONE_CONFIG_FILE}.`),
+        "",
+        pc.dim("Hook cleanup did not begin."),
+        pc.dim(
+          "Package metadata may already contain the complete intended cleanup.",
+        ),
+        pc.dim("Fix storage or permissions, then rerun uninstall safely."),
+      ]);
+      process.exit(1);
+    }
+    removed.push(STANDALONE_CONFIG_FILE);
   }
   for (const hookPath of hookCandidates) {
     try {

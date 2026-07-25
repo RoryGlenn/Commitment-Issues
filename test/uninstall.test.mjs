@@ -20,6 +20,7 @@ import {
   createTempRepo,
   fakeGitEnv,
   fsFailurePreload,
+  mutableProjectFileFailurePreload,
   readFile,
   repoRoot,
   run,
@@ -143,9 +144,56 @@ test("uninstall refuses an unwritable package before removing hooks", (t) => {
 test("uninstall reports a package write failure after preflight", (t) => {
   const tempDir = createTempRepo();
   t.after(() => cleanupTempRepo(tempDir));
+  writeFile(path.join(tempDir, ".commitmentrc.json"), "{}\n");
   assert.equal(runScript(tempDir, "init").status, 0);
   const packagePath = path.join(tempDir, "package.json");
   const packageBefore = readFile(tempDir, "package.json");
+  const standaloneBefore = readFile(tempDir, ".commitmentrc.json");
+  const hookPath = gitHook(tempDir, "pre-commit");
+  const hookBefore = fs.readFileSync(hookPath, "utf8");
+  const preload = mutableProjectFileFailurePreload(tempDir);
+
+  const result = run(
+    "node",
+    ["--import", preload, path.join(tempDir, "scripts", "uninstall.mjs")],
+    tempDir,
+    {
+      env: {
+        ...process.env,
+        TEST_FS_FAILURE_METHOD: "writeSync",
+        TEST_FS_FAILURE_PATH: packagePath,
+        TEST_FS_FAILURE_CODE: "EIO",
+      },
+    },
+  );
+  const output = `${result.stdout}${result.stderr}`;
+  assert.equal(result.status, 1);
+  assert.match(output, /filesystem write failed before hook cleanup began/i);
+  assert.equal(readFile(tempDir, "package.json"), packageBefore);
+  assert.equal(readFile(tempDir, ".commitmentrc.json"), standaloneBefore);
+  assert.equal(fs.readFileSync(hookPath, "utf8"), hookBefore);
+  assert.deepEqual(
+    fs
+      .readdirSync(tempDir)
+      .filter(
+        (entry) =>
+          entry.includes(".commitment-issues-") && entry.endsWith(".tmp"),
+      ),
+    [],
+  );
+
+  assert.equal(runScript(tempDir, "uninstall").status, 0);
+  assert.equal(fs.existsSync(hookPath), false);
+  assert.equal(fs.existsSync(path.join(tempDir, ".commitmentrc.json")), false);
+});
+
+test("uninstall preserves hooks when standalone configuration removal fails", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const standalonePath = path.join(tempDir, ".commitmentrc.json");
+  writeFile(standalonePath, "{}\n");
+  assert.equal(runScript(tempDir, "init").status, 0);
+  const standaloneBefore = fs.readFileSync(standalonePath, "utf8");
   const hookPath = gitHook(tempDir, "pre-commit");
   const hookBefore = fs.readFileSync(hookPath, "utf8");
   const preload = fsFailurePreload(tempDir);
@@ -157,16 +205,23 @@ test("uninstall reports a package write failure after preflight", (t) => {
     {
       env: {
         ...process.env,
-        TEST_FS_FAILURE_METHOD: "openSync",
-        TEST_FS_FAILURE_PATH: packagePath,
+        TEST_FS_FAILURE_METHOD: "rmSync",
+        TEST_FS_FAILURE_PATH: standalonePath,
       },
     },
   );
   const output = `${result.stdout}${result.stderr}`;
+
   assert.equal(result.status, 1);
-  assert.match(output, /filesystem write failed before hook cleanup began/i);
-  assert.equal(readFile(tempDir, "package.json"), packageBefore);
+  assert.match(output, /Could not remove \.commitmentrc\.json/);
+  assert.match(output, /Hook cleanup did not begin/);
+  assert.doesNotThrow(() => JSON.parse(readFile(tempDir, "package.json")));
+  assert.equal(fs.readFileSync(standalonePath, "utf8"), standaloneBefore);
   assert.equal(fs.readFileSync(hookPath, "utf8"), hookBefore);
+
+  assert.equal(runScript(tempDir, "uninstall").status, 0);
+  assert.equal(fs.existsSync(standalonePath), false);
+  assert.equal(fs.existsSync(hookPath), false);
 });
 
 for (const fileName of ["package.json", ".commitmentrc.json"]) {

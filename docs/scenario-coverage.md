@@ -292,7 +292,8 @@ production-readiness workstream #130 is consolidated in the
 - **INIT-032** — shallow clones and submodules install hooks in their own Git common directories without requiring full history. Fixture: `test/repository-shapes.test.mjs`.
 - **INIT-033** — setup and dry-run refuse linked or non-regular mutable project
   files before package, configuration, gitignore, or hook changes; stable
-  descriptor and identity checks protect the final write boundary. Unit/fixture:
+  staged-file and destination identity checks protect the final write boundary.
+  Unit/fixture:
   `test/lib-files.test.mjs`, `test/init-gitignore.test.mjs`,
   `test/init.test.mjs`.
 - **INIT-034** — Husky, Lefthook, and pre-commit coexistence prints exact
@@ -309,6 +310,15 @@ production-readiness workstream #130 is consolidated in the
   names and package YAML keys are reported only as separate, non-executed
   composition evidence. Unit/fixture: `test/hooks.test.mjs`,
   `test/init.test.mjs`.
+- **INIT-036** — package, standalone-configuration, and gitignore replacements
+  stage complete bytes and verify them byte-for-byte through a no-follow
+  descriptor before commit. Short, failed, unsynced, unclosed, changed, or
+  uncommitted writes preserve complete old bytes; forced termination across
+  every staging phase leaves complete old or new content, retries remove only
+  dead-writer transaction files, concurrent readers never parse a partial
+  file, original permission bits survive, and hooks remain untouched until all
+  required project-file writes complete. Unit/subprocess:
+  `test/lib-files.test.mjs`, `test/init.test.mjs`.
 
 ## Uninstall
 
@@ -336,6 +346,11 @@ production-readiness workstream #130 is consolidated in the
 - **UNINST-019** — uninstall and dry-run remove exact owner-specific prepare
   repair while preserving recognized current and pre-dispatch Husky, Lefthook,
   and pre-commit content byte-for-byte and reporting manual cleanup. Fixture:
+  `test/uninstall.test.mjs`.
+- **UNINST-020** — an interrupted or failed package replacement leaves complete
+  project-file bytes and preserves standalone configuration plus generated hook
+  state; retry safely completes removal and clears any dead-writer transaction
+  file. Unit/subprocess: `test/lib-files.test.mjs`,
   `test/uninstall.test.mjs`.
 
 ### Pre-commit checks

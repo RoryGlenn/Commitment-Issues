@@ -256,6 +256,18 @@ not bypass inspection.
 
 Automatic fixes are guarded. The tool refuses risky mutation when staged and unstaged changes overlap, and `commit:fix` only amends when the working tree is safe enough to do so.
 
+### Crash-safe project-file mutation
+
+Setup and removal do not truncate `package.json`, `.commitmentrc.json`, or
+`.gitignore` in place. They stage complete replacement bytes under a randomized
+same-directory name, preserve permission bits, sync and close the staged file,
+revalidate both staged and destination identities, and then commit through
+same-filesystem rename or an exclusive hard link for a previously missing
+path. A failed or terminated writer therefore leaves complete old or new
+destination bytes. Reserved transaction files are cleaned only when their
+encoded writer is no longer active and the entry remains a regular file owned
+by the current user; ambiguous entries fail closed.
+
 ### Malformed or untrusted configuration
 
 The effective configuration from `.commitmentrc.json` and `package.json` is

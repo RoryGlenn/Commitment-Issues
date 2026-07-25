@@ -149,10 +149,21 @@ a command can modify must be regular files: `init` checks `package.json`,
 `.gitignore`, and `.commitmentrc.json`, while `uninstall` checks `package.json`
 and `.commitmentrc.json`. Both commands refuse symbolic links, directories, and
 paths that cannot be inspected safely, including during `--dry-run`. Before a
-write, the open descriptor is matched to the originally inspected path and
-identity. Creating a missing file uses exclusive creation, and
-standalone-config removal rechecks the same identity immediately before
-deletion.
+write, the destination and its containing directory must be writable. The
+complete replacement is written under a randomized, reserved name in that same
+directory; short writes are completed, the original POSIX permission bits are
+applied, and the staged file is size-checked, synced, closed, and matched back
+to its opened identity. The destination identity is then revalidated at the
+commit boundary. Existing files are replaced by same-filesystem rename so
+concurrent readers see complete old or new bytes, while a missing destination
+uses an atomic hard-link commit that refuses a concurrently inserted path.
+
+An ordinary failure cleans up only the exact transaction file opened by that
+invocation. A forced termination can leave the reserved stage behind; a later
+write removes it only after its encoded process ID is no longer active and its
+regular-file ownership is verified. The retry never treats that stage as a
+project file. Standalone-config removal continues to recheck the inspected
+destination identity immediately before deletion.
 
 ## Git hook interface
 

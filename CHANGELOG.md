@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Setup and uninstall no longer truncate consumer-owned project files in
+  place. Complete replacement bytes are staged, permissioned, synced, closed,
+  and revalidated byte-for-byte through a no-follow descriptor before an atomic
+  commit; short writes and later filesystem failures leave each file as a
+  complete old or new version, never empty or partial. Retry also removes
+  reserved transaction files left by a terminated writer without touching an
+  active process's stage.
+
 ## [3.5.0] - 2026-07-23
 
 ### Added

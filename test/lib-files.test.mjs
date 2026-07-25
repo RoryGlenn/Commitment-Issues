@@ -70,7 +70,9 @@ test("mutable project file reads stay bound to the inspected regular file", (t) 
 
   assert.deepEqual(readMutableProjectFile(state), content);
 
-  fs.writeFileSync(file, '{"changed":true}\n');
+  const replacement = path.join(dir, "replacement.json");
+  fs.writeFileSync(replacement, '{"changed":true}\n');
+  fs.renameSync(replacement, file);
   assert.throws(
     () => readMutableProjectFile(state),
     (error) => error.code === "ESTALE",

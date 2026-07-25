@@ -464,6 +464,195 @@ test("runFixTools rejects an uncaptured Prettier target", async () => {
   );
 });
 
+test(
+  "runFixTools bounds captured-input concurrency and preserves output order",
+  { timeout: 2000 },
+  async () => {
+    const files = Array.from({ length: 6 }, (_, index) => `src/${index}.json`);
+    const targets = files.map((file, index) => ({
+      file,
+      expectedContent: Buffer.from(`{"index":${index}}\n`),
+    }));
+    let active = 0;
+    let maximumActive = 0;
+    let started = 0;
+    let release;
+    let reachedBound;
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    const atBound = new Promise((resolve) => {
+      reachedBound = resolve;
+    });
+
+    const execution = runFixTools(
+      targets,
+      { eslintFiles: [], prettierFiles: files },
+      {
+        concurrency: 2,
+        now: () => 0,
+        timeoutMs: 1000,
+        runToolCommand: async (name, args, options) => {
+          assert.equal(name, "prettier");
+          assert.equal(args.at(-1), files[started]);
+          active += 1;
+          started += 1;
+          maximumActive = Math.max(maximumActive, active);
+          if (started === 2) {
+            reachedBound();
+          }
+          await gate;
+          active -= 1;
+          return {
+            outcome: "success",
+            status: 0,
+            signal: null,
+            stdout: options.input.toUpperCase(),
+            stderr: "",
+          };
+        },
+      },
+    );
+
+    await atBound;
+    assert.equal(active, 2);
+    release();
+    const result = await execution;
+
+    assert.equal(maximumActive, 2);
+    assert.equal(result.toolFailed, false);
+    assert.deepEqual(
+      [...result.outputs],
+      targets.map((target) => [
+        target.file,
+        target.expectedContent.toString("utf8").toUpperCase(),
+      ]),
+    );
+  },
+);
+
+test("runFixTools shares one deadline across ESLint and Prettier", async () => {
+  const files = ["src/first.js", "src/second.js"];
+  const targets = files.map((file) => ({
+    file,
+    expectedContent: Buffer.from("const value = 1;\n"),
+  }));
+  const calls = [];
+  let now = 0;
+
+  const result = await runFixTools(
+    targets,
+    { eslintFiles: [files[0]], prettierFiles: files },
+    {
+      concurrency: 1,
+      now: () => now,
+      timeoutMs: 100,
+      runToolCommand: async (name, _args, options) => {
+        calls.push({ name, timeoutMs: options.timeoutMs });
+        if (name === "eslint") {
+          now = 70;
+          return {
+            outcome: "success",
+            status: 0,
+            signal: null,
+            stdout: JSON.stringify([
+              { filePath: path.resolve(files[0]), messages: [] },
+            ]),
+            stderr: "",
+          };
+        }
+        now = 100;
+        return {
+          outcome: "timeout",
+          status: null,
+          signal: null,
+          stdout: "",
+          stderr: "",
+          timedOut: true,
+        };
+      },
+    },
+  );
+
+  assert.deepEqual(calls, [
+    { name: "eslint", timeoutMs: 100 },
+    { name: "prettier", timeoutMs: 30 },
+  ]);
+  assert.equal(result.toolFailed, true);
+  assert.deepEqual(result.missingTools, []);
+  assert.deepEqual(
+    [...result.outputs],
+    targets.map((target) => [
+      target.file,
+      target.expectedContent.toString("utf8"),
+    ]),
+  );
+});
+
+test("runFixTools stops launching files after its overall deadline", async () => {
+  const file = "src/input.js";
+  let now = 0;
+  const calls = [];
+
+  const result = await runFixTools(
+    [{ file, expectedContent: Buffer.from("const value = 1;\n") }],
+    { eslintFiles: [file], prettierFiles: [file] },
+    {
+      concurrency: 1,
+      now: () => now,
+      timeoutMs: 100,
+      runToolCommand: async (name, _args, options) => {
+        calls.push({ name, timeoutMs: options.timeoutMs });
+        now = 100;
+        return {
+          outcome: "success",
+          status: 0,
+          signal: null,
+          stdout: JSON.stringify([
+            { filePath: path.resolve(file), messages: [] },
+          ]),
+          stderr: "",
+        };
+      },
+    },
+  );
+
+  assert.deepEqual(calls, [{ name: "eslint", timeoutMs: 100 }]);
+  assert.equal(result.toolFailed, true);
+});
+
+test("runFixTools stops ESLint fan-out after an interrupted child", async () => {
+  const files = ["src/first.js", "src/second.js"];
+  let calls = 0;
+
+  const result = await runFixTools(
+    files.map((file) => ({
+      file,
+      expectedContent: Buffer.from("const value = 1;\n"),
+    })),
+    { eslintFiles: files, prettierFiles: [] },
+    {
+      concurrency: 1,
+      now: () => 0,
+      timeoutMs: 100,
+      runToolCommand: async () => {
+        calls += 1;
+        return {
+          outcome: "timeout",
+          status: null,
+          signal: null,
+          stdout: "",
+          stderr: "",
+          timedOut: true,
+        };
+      },
+    },
+  );
+
+  assert.equal(calls, 1);
+  assert.equal(result.toolFailed, true);
+});
+
 test("applyFixOutputs requires attributable output for every target", (t) => {
   const { tempDir, file } = createStagedTarget(t);
   const snapshot = captureStagedTarget(tempDir, file);

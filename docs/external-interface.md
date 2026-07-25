@@ -122,7 +122,9 @@ identity. ESLint and Prettier receive captured content through stdin with the
 original path used only for configuration and parser selection; they never
 receive a live target to rewrite. Complete attributable outputs are then
 written with the crash-resistant project-file transaction and rechecked
-byte-for-byte.
+byte-for-byte. Per-file tool processes run with bounded concurrency and share
+one `precommitChecks.timeoutMs` deadline across the complete fix operation, so
+file count cannot multiply the configured timeout.
 
 Immediately before staging, the commands verify the same `HEAD`, index, and
 expected worktree bytes. Fixed content is hashed explicitly and a prepared

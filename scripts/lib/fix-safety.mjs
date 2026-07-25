@@ -9,10 +9,17 @@ import {
   readMutableProjectFile,
   writeMutableProjectFile,
 } from "./files.mjs";
-import { run, runTool } from "./process.mjs";
+import { run, runTool, TOOL_TIMEOUT_MS } from "./process.mjs";
 
 const GIT_PATH_ARGS = ["-c", "core.quotePath=false"];
 const REGULAR_INDEX_MODES = new Set(["100644", "100755"]);
+const FIX_TOOL_CONCURRENCY = 4;
+const FIX_TOOL_INTERRUPTION_OUTCOMES = new Set([
+  "missing-tool",
+  "signal",
+  "spawn-error",
+  "timeout",
+]);
 
 function fixError(code, message, cause) {
   const error = new Error(message, cause ? { cause } : undefined);
@@ -313,6 +320,43 @@ function appendDiagnostic(diagnostics, result) {
   }
 }
 
+async function runBoundedFixTasks(
+  items,
+  runTask,
+  { concurrency, deadline, maximumTimeoutMs, now },
+) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  let stopped = false;
+
+  async function worker() {
+    while (!stopped) {
+      const index = nextIndex;
+      if (index >= items.length) {
+        return;
+      }
+      nextIndex += 1;
+      const remainingMs = Math.min(
+        maximumTimeoutMs,
+        Math.ceil(deadline - now()),
+      );
+      if (remainingMs <= 0) {
+        stopped = true;
+        return;
+      }
+      const result = await runTask(items[index], remainingMs);
+      results[index] = { item: items[index], result };
+      if (FIX_TOOL_INTERRUPTION_OUTCOMES.has(result.outcome)) {
+        stopped = true;
+      }
+    }
+  }
+
+  const workerCount = Math.min(concurrency, items.length);
+  await Promise.all(Array.from({ length: workerCount }, async () => worker()));
+  return results.filter(Boolean);
+}
+
 /**
  * Convert one ESLint JSON report into stable path-attributed diagnostics.
  * @param {string} output - ESLint JSON stdout.
@@ -345,9 +389,19 @@ export function eslintDiagnostics(output, file) {
  * a live path it can rewrite.
  * @param {ReturnType<typeof captureFixSnapshot>["targets"]} targets - Inputs.
  * @param {{eslintFiles: string[], prettierFiles: string[]}} files - Tool sets.
+ * @param {{concurrency?: number, now?: () => number, runToolCommand?: typeof runTool, timeoutMs?: number}} [options] - Bounded runner options.
  * @returns {Promise<{outputs: Map<string, string>, toolFailed: boolean, missingTools: string[], diagnostics: string[]}>} Attributable outputs.
  */
-export async function runFixTools(targets, { eslintFiles, prettierFiles }) {
+export async function runFixTools(
+  targets,
+  { eslintFiles, prettierFiles },
+  {
+    concurrency = FIX_TOOL_CONCURRENCY,
+    now = Date.now,
+    runToolCommand = runTool,
+    timeoutMs = TOOL_TIMEOUT_MS,
+  } = {},
+) {
   const outputs = new Map(
     targets.map((target) => [
       target.file,
@@ -359,23 +413,46 @@ export async function runFixTools(targets, { eslintFiles, prettierFiles }) {
   const diagnostics = [];
   let toolFailed = false;
 
-  for (const file of eslintFiles) {
-    if (!targetFiles.has(file)) {
-      throw applyError(`ESLint target was not captured: ${file}`);
+  for (const [tool, files] of [
+    ["ESLint", eslintFiles],
+    ["Prettier", prettierFiles],
+  ]) {
+    for (const file of files) {
+      if (!targetFiles.has(file)) {
+        throw applyError(`${tool} target was not captured: ${file}`);
+      }
     }
+  }
+
+  const deadline = now() + timeoutMs;
+  const runnerOptions = {
+    concurrency,
+    deadline,
+    maximumTimeoutMs: timeoutMs,
+    now,
+  };
+  const eslintResults = await runBoundedFixTasks(
+    eslintFiles,
+    (file, remainingMs) =>
+      runToolCommand(
+        "eslint",
+        [
+          "--fix-dry-run",
+          "--stdin",
+          "--stdin-filename",
+          file,
+          "--format",
+          "json",
+        ],
+        { input: outputs.get(file), timeoutMs: remainingMs },
+      ),
+    runnerOptions,
+  );
+  if (eslintResults.length !== eslintFiles.length) {
+    toolFailed = true;
+  }
+  for (const { item: file, result } of eslintResults) {
     const input = outputs.get(file);
-    const result = await runTool(
-      "eslint",
-      [
-        "--fix-dry-run",
-        "--stdin",
-        "--stdin-filename",
-        file,
-        "--format",
-        "json",
-      ],
-      { input },
-    );
     appendDiagnostic(diagnostics, result);
     if (result.outcome === "missing-tool") {
       missingTools.add(result.missingTool);
@@ -396,14 +473,19 @@ export async function runFixTools(targets, { eslintFiles, prettierFiles }) {
     }
   }
 
-  for (const file of prettierFiles) {
-    if (!targetFiles.has(file)) {
-      throw applyError(`Prettier target was not captured: ${file}`);
-    }
-    const input = outputs.get(file);
-    const result = await runTool("prettier", ["--stdin-filepath", file], {
-      input,
-    });
+  const prettierResults = await runBoundedFixTasks(
+    prettierFiles,
+    (file, remainingMs) =>
+      runToolCommand("prettier", ["--stdin-filepath", file], {
+        input: outputs.get(file),
+        timeoutMs: remainingMs,
+      }),
+    runnerOptions,
+  );
+  if (prettierResults.length !== prettierFiles.length) {
+    toolFailed = true;
+  }
+  for (const { item: file, result } of prettierResults) {
     appendDiagnostic(diagnostics, result);
     if (result.outcome === "missing-tool") {
       missingTools.add(result.missingTool);

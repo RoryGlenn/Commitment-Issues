@@ -72,7 +72,9 @@ Push pure logic **down into `scripts/lib/`** so it can be unit-tested directly; 
   `stageFixOutputs` bind explicit fixer commands to exact `HEAD`, index
   identity/bytes/tree, and target bytes. Use this transaction for live
   worktree or index mutation; do not pass live target paths to writable
-  formatter modes or replace exact blob staging with `git add`.
+  formatter modes or replace exact blob staging with `git add`. Captured-input
+  tool processes use bounded concurrency and share one `timeoutMs` deadline
+  across the complete fix operation.
 
 ### `package-manager.mjs`
 

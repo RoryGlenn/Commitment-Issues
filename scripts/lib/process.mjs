@@ -445,6 +445,103 @@ export function detachedForPlatform(platform) {
   return platform !== "win32";
 }
 
+const SIGNAL_EXIT_CODES = { SIGHUP: 129, SIGINT: 130, SIGTERM: 143 };
+const PROCESS_CLEANUP_GRACE_MS = 1000;
+
+/** Create invocation-wide process-tree signal ownership. */
+export function createProcessInterruptionManager({
+  targetProcess = process,
+  platform = process.platform,
+  terminate = terminateProcessTree,
+  cleanupGraceMs = PROCESS_CLEANUP_GRACE_MS,
+} = {}) {
+  const signals = Object.keys(SIGNAL_EXIT_CODES);
+  const trees = new Set();
+  let parentSignal;
+  let finished = false;
+  const handlers = Object.fromEntries(
+    signals.map((signal) => [signal, () => interrupt(signal)]),
+  );
+
+  function listen(method) {
+    for (const signal of signals) {
+      targetProcess[method](signal, handlers[signal]);
+    }
+  }
+
+  function finishInterruption() {
+    if (finished || !parentSignal || trees.size > 0) return;
+    finished = true;
+    listen("off");
+    const exitCode = SIGNAL_EXIT_CODES[parentSignal];
+    if (platform === "win32") {
+      targetProcess.exit(exitCode);
+      return;
+    }
+    try {
+      targetProcess.kill(targetProcess.pid, parentSignal);
+    } catch {
+      targetProcess.exit(exitCode);
+    }
+  }
+
+  function release(entry) {
+    if (!trees.delete(entry)) return;
+    clearTimeout(entry.timer);
+    entry.resolveDone();
+    if (!parentSignal && trees.size === 0) listen("off");
+    finishInterruption();
+  }
+
+  function stop(entry) {
+    if (!entry.cleanup) {
+      entry.cleanup = terminate(entry.child);
+      entry.timer = setTimeout(() => {
+        for (const stream of [
+          entry.child.stdin,
+          entry.child.stdout,
+          entry.child.stderr,
+        ]) {
+          stream?.destroy?.();
+        }
+        entry.child.unref?.();
+        release(entry);
+      }, cleanupGraceMs);
+    }
+    return entry.cleanup;
+  }
+
+  function interrupt(signal) {
+    if (parentSignal) return;
+    parentSignal = signal;
+    for (const entry of trees) {
+      stop(entry);
+    }
+    finishInterruption();
+  }
+
+  return {
+    track(child) {
+      let resolveDone;
+      const done = new Promise((resolve) => {
+        resolveDone = resolve;
+      });
+      const entry = { child, resolveDone };
+      trees.add(entry);
+      if (trees.size === 1 && !parentSignal) listen("on");
+      if (parentSignal) stop(entry);
+      return {
+        terminate: () => stop(entry),
+        release: () => release(entry),
+        done,
+      };
+    },
+    isInterrupted: () => Boolean(parentSignal),
+  };
+}
+
+const interruptionManager = createProcessInterruptionManager();
+
 /**
  * Asynchronous spawn with a structured outcome. Pass `echo: true` to tee the
  * child's output live while still capturing it. `input` sends exact stdin
@@ -509,19 +606,21 @@ export function spawnAsync(command, args, options = {}) {
       return;
     }
 
+    const trackedTree = interruptionManager.track(child);
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let spawnError;
+    let timeoutCleanup = null;
     const finish = (payload) => {
-      if (settled) {
+      if (settled || interruptionManager.isInterrupted()) {
         return;
       }
       settled = true;
       clearTimeout(timer);
       resolve(withOutcome(payload));
     };
-    const timer = setTimeout(() => {
-      const cleanup = terminateProcessTree(child);
+    const finishTimeout = () =>
       finish({
         error: undefined,
         status: null,
@@ -529,8 +628,11 @@ export function spawnAsync(command, args, options = {}) {
         stdout,
         stderr,
         timedOut: true,
-        cleanup,
+        cleanup: timeoutCleanup,
       });
+    const timer = setTimeout(() => {
+      timeoutCleanup = trackedTree.terminate();
+      trackedTree.done.then(finishTimeout);
     }, timeoutMs);
 
     if (child.stdout) {
@@ -559,10 +661,25 @@ export function spawnAsync(command, args, options = {}) {
     }
 
     child.on("error", (error) => {
-      finish({ error, status: null, signal: null, stdout, stderr });
+      spawnError = error;
+      if (!child.pid) {
+        trackedTree.release();
+        finish({ error, status: null, signal: null, stdout, stderr });
+      }
     });
     child.on("close", (status, signal) => {
-      finish({ error: undefined, status, signal, stdout, stderr });
+      trackedTree.release();
+      if (timeoutCleanup !== null) {
+        finishTimeout();
+        return;
+      }
+      finish({
+        error: spawnError,
+        status: spawnError ? null : status,
+        signal: spawnError ? null : signal,
+        stdout,
+        stderr,
+      });
     });
   });
 }

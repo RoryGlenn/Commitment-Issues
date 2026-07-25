@@ -6,15 +6,20 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
 import { countTerminalBoxes, stripAnsi } from "./helpers/output.mjs";
 import {
   addBareRemote,
   cleanupTempRepo,
   createTempRepo,
   fakeGitEnv,
+  installInterruptibleProcessFixture,
   readFile,
   recordingGitEnv,
   run,
+  runAsync,
+  waitForCompletion,
+  waitForPath,
   writeFile,
 } from "./helpers/temp-repo.mjs";
 
@@ -537,6 +542,59 @@ test("blocks the push and reports a timeout when the test command exceeds timeou
   assert.match(output, /Push blocked: could not run tests/);
   assert.match(output, /timed out/);
 });
+
+test(
+  "prepush cancels custom-runner descendants before exiting on SIGINT",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const tempDir = createTempRepo();
+    commitWidget(tempDir, 1);
+    const target = path.join(tempDir, "src", "widget.test.mjs");
+    const original = readFile(tempDir, "src/widget.test.mjs");
+    const fixture = installInterruptibleProcessFixture(tempDir, {
+      target,
+      mutation: "export const survivor = true;\n",
+    });
+    setConfig(tempDir, {
+      advisePushTests: true,
+      testCommand: fixture.command,
+    });
+    const execution = runAsync(
+      process.execPath,
+      [path.join(tempDir, "scripts", "prepush.mjs")],
+      tempDir,
+      {
+        input: pushInput(tempDir),
+        env: { ...process.env, ...fixture.env },
+      },
+    );
+    t.after(() => {
+      execution.child.kill("SIGKILL");
+      fixture.cleanup();
+      cleanupTempRepo(tempDir);
+    });
+
+    await waitForPath(fixture.ready);
+    execution.child.kill("SIGINT");
+    const result = await waitForCompletion(
+      execution.completed,
+      "prepush did not finish cancellation",
+    );
+    const bytesAtExit = readFile(tempDir, "src/widget.test.mjs");
+
+    fixture.release();
+    await delay(250);
+
+    assert.equal(result.status, null);
+    assert.equal(result.signal, "SIGINT");
+    assert.equal(bytesAtExit, original);
+    assert.equal(readFile(tempDir, "src/widget.test.mjs"), original);
+    assert.equal(
+      run("git", ["show", "HEAD:src/widget.test.mjs"], tempDir).stdout,
+      original,
+    );
+  },
+);
 
 test("advisory mode runs tests and warns without blocking on failure", (t) => {
   const tempDir = createTempRepo();

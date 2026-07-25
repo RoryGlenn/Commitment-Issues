@@ -292,11 +292,15 @@ as a fallback if tree termination is unavailable. The hook reports a timeout
 separately from a spawn failure, external signal, normal nonzero exit, or
 success.
 
-Cleanup covers descendants that remain attached to the command's process group
-or Windows process tree. A descendant that deliberately daemonizes, reparents,
-or creates a separate process group can escape that boundary; the operating
-system does not expose one portable, permission-free way to reclaim such a
-process. Commands used in hooks should not launch background daemons.
+While active, the CLI owns `SIGINT`, `SIGTERM`, and `SIGHUP`. The first signal
+terminates all active trees before preserving the POSIX signal or Windows
+status; timeouts share that cleanup. It waits one second for attached
+descendants and pipes, then releases pipe handles so a survivor cannot wedge
+the hook.
+
+Cleanup covers the command's process group or Windows tree. A daemonized,
+reparented, or separate-group descendant may escape and continue; no portable,
+permission-free API can reclaim it. Hook commands should not launch daemons.
 
 ### Using a different test runner
 

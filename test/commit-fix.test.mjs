@@ -16,12 +16,14 @@ import {
   createTempRepo,
   fakeGitEnv,
   installBlockingPrettierFixture,
+  installInterruptibleProcessFixture,
   REAL_GIT,
   readFile,
   readHeadFile,
   run,
   runAsync,
   setPrecommitConfig,
+  waitForCompletion,
   waitForPath,
   writeCrossPlatformShim,
   writeFile,
@@ -905,6 +907,66 @@ test("warns when a format-only file cannot be fixed automatically", (t) => {
   assert.equal(result.status, 1);
   assert.match(output, /Manual attention still needed\./);
 });
+
+test(
+  "commit-fix cancels formatter descendants before exiting on SIGTERM",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const tempDir = createTempRepo();
+    const target = path.join(tempDir, "src", "interrupt.json");
+    const original = '{"safe":true}\n';
+    const mutation = '{"survivor":true}\n';
+    const fixture = installInterruptibleProcessFixture(tempDir, {
+      target,
+      mutation,
+      asPrettier: true,
+    });
+    run("git", ["rm", "--cached", "--force", "node_modules"], tempDir);
+    writeFile(target, original);
+    run("git", ["add", "src/interrupt.json"], tempDir);
+    run("git", ["commit", "-m", "interrupt target"], tempDir);
+    const headBefore = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+    const execution = runAsync(
+      process.execPath,
+      [path.join(tempDir, "scripts", "commit-fix.mjs")],
+      tempDir,
+      { env: { ...process.env, ...fixture.env } },
+    );
+    t.after(() => {
+      execution.child.kill("SIGKILL");
+      fixture.cleanup();
+      cleanupTempRepo(tempDir);
+    });
+
+    await Promise.race([
+      waitForPath(fixture.ready),
+      execution.completed.then((result) => {
+        throw new Error(
+          `commit-fix exited before the fixture started: ${JSON.stringify(result)}`,
+        );
+      }),
+    ]);
+    execution.child.kill("SIGTERM");
+    const result = await waitForCompletion(
+      execution.completed,
+      "commit-fix did not finish cancellation",
+    );
+    const bytesAtExit = readFile(tempDir, "src/interrupt.json");
+
+    fixture.release();
+    await delay(250);
+
+    assert.equal(result.status, null);
+    assert.equal(result.signal, "SIGTERM");
+    assert.equal(bytesAtExit, original);
+    assert.equal(readFile(tempDir, "src/interrupt.json"), original);
+    assert.equal(readHeadFile(tempDir, "src/interrupt.json"), original);
+    assert.equal(
+      run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+      headBefore,
+    );
+  },
+);
 
 test("reports local install guidance when committed-file tools are missing", (t) => {
   const tempDir = createTempRepo();

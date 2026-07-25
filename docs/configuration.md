@@ -292,6 +292,12 @@ as a fallback if tree termination is unavailable. The hook reports a timeout
 separately from a spawn failure, external signal, normal nonzero exit, or
 success.
 
+While commands are active, the CLI owns `SIGINT`, `SIGTERM`, and `SIGHUP`. The
+first signal terminates all active trees and waits for child, descendant, and
+inherited-pipe closure before preserving the POSIX signal or Windows status.
+Timeouts share this idempotent cleanup, so races cannot leave tracked
+descendants able to write.
+
 Cleanup covers descendants that remain attached to the command's process group
 or Windows process tree. A descendant that deliberately daemonizes, reparents,
 or creates a separate process group can escape that boundary; the operating

@@ -5,6 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   cleanupTempRepo,
   createExternalHardlink,
@@ -12,9 +13,11 @@ import {
   createTempRepo,
   fakeGitEnv,
   installBlockingPrettierFixture,
+  installInterruptibleProcessFixture,
   readFile,
   run,
   runAsync,
+  waitForCompletion,
   waitForPath,
   writeFile,
 } from "./helpers/temp-repo.mjs";
@@ -64,6 +67,64 @@ test("shows info box when there are no staged fixable files", (t) => {
   assert.equal(result.status, 0);
   assert.match(output, /No staged files to fix\./);
 });
+
+test(
+  "fix-staged cancels formatter descendants before exiting on SIGINT",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const tempDir = createTempRepo();
+    const target = path.join(tempDir, "src", "interrupt.json");
+    const original = '{"safe":true}\n';
+    const mutation = '{"survivor":true}\n';
+    const fixture = installInterruptibleProcessFixture(tempDir, {
+      target,
+      mutation,
+      asPrettier: true,
+    });
+    run("git", ["rm", "--cached", "--force", "node_modules"], tempDir);
+    run("git", ["commit", "-m", "use local fixture"], tempDir);
+    writeFile(target, original);
+    run("git", ["add", "src/interrupt.json"], tempDir);
+    const execution = runAsync(
+      process.execPath,
+      [path.join(tempDir, "scripts", "fix-staged.mjs")],
+      tempDir,
+      { env: { ...process.env, ...fixture.env } },
+    );
+    t.after(() => {
+      execution.child.kill("SIGKILL");
+      fixture.cleanup();
+      cleanupTempRepo(tempDir);
+    });
+
+    await Promise.race([
+      waitForPath(fixture.ready),
+      execution.completed.then((result) => {
+        throw new Error(
+          `fix-staged exited before the fixture started: ${JSON.stringify(result)}`,
+        );
+      }),
+    ]);
+    execution.child.kill("SIGINT");
+    const result = await waitForCompletion(
+      execution.completed,
+      "fix-staged did not finish cancellation",
+    );
+    const bytesAtExit = readFile(tempDir, "src/interrupt.json");
+
+    fixture.release();
+    await delay(250);
+
+    assert.equal(result.status, null);
+    assert.equal(result.signal, "SIGINT");
+    assert.equal(bytesAtExit, original);
+    assert.equal(readFile(tempDir, "src/interrupt.json"), original);
+    assert.equal(
+      run("git", ["show", ":src/interrupt.json"], tempDir).stdout,
+      original,
+    );
+  },
+);
 
 test("surfaces the detected package manager in command hints", (t) => {
   const tempDir = createTempRepo();

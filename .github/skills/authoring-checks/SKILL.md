@@ -36,7 +36,11 @@ Push pure logic **down into `scripts/lib/`** so it can be unit-tested directly; 
 - `local-tool.mjs`: `localToolInvocation(name, extraArgs, cwd)` resolves only a project
   `node_modules/.bin` executable and returns `null` when absent. Use for optional
   integrations such as commitlint that must never fall back to npx/global/network.
-- `spawnAsync(command, args, options?)` — async spawn with the shared timeout.
+- `spawnAsync(command, args, options?)` — async spawn with the shared timeout
+  and invocation-wide `SIGHUP`/`SIGINT`/`SIGTERM` process-tree cancellation.
+  Keep long-running commands on this boundary so the parent waits for attached
+  descendants and inherited pipes before preserving signal-appropriate exit
+  behavior.
 - `TOOL_TIMEOUT_MS` — default 120s ceiling so a hung tool can't wedge a commit; overridden by `precommitChecks.timeoutMs` (positive number).
 - `isPackageInstalled(name, cwd)` — **fs-based** walk up `node_modules/<name>/package.json`. Must stay fs-based: a package whose `exports` map hides `package.json` makes `require.resolve('<name>/package.json')` throw (false negative). Do not "simplify" it to `require.resolve`.
 
@@ -74,7 +78,8 @@ Push pure logic **down into `scripts/lib/`** so it can be unit-tested directly; 
   worktree or index mutation; do not pass live target paths to writable
   formatter modes or replace exact blob staging with `git add`. Captured-input
   tool processes use bounded concurrency and share one `timeoutMs` deadline
-  across the complete fix operation.
+  across the complete fix operation. Parent-signal cancellation and timeout
+  cleanup must continue to share the same idempotent tracked-tree operation.
 
 ### `package-manager.mjs`
 

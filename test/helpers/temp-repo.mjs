@@ -39,14 +39,15 @@ export function run(command, args, cwd, options = {}) {
 }
 
 export function runAsync(command, args, cwd, options = {}) {
-  const env = withoutGitLocalEnvironment(options.env ?? process.env);
+  const { input, ...spawnOptions } = options;
+  const env = withoutGitLocalEnvironment(spawnOptions.env ?? process.env);
   delete env.HUSKY;
   delete env.COMMITMENT_ISSUES;
   const child = spawn(command, args, {
     cwd,
-    ...options,
+    ...spawnOptions,
     env,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["pipe", "pipe", "pipe"],
   });
   let stdout = "";
   let stderr = "";
@@ -58,6 +59,8 @@ export function runAsync(command, args, cwd, options = {}) {
   child.stderr.on("data", (chunk) => {
     stderr += chunk;
   });
+  child.stdin.on("error", () => {});
+  child.stdin.end(input);
   const completed = new Promise((resolve) => {
     child.on("error", (error) => {
       resolve({ status: null, signal: null, stdout, stderr, error });
@@ -78,6 +81,20 @@ export async function waitForPath(filePath, timeoutMs = 5000) {
     await delay(10);
   }
   throw new Error(`Timed out waiting for ${filePath}`);
+}
+
+export async function waitForCompletion(completed, message, timeoutMs = 5000) {
+  let timer;
+  try {
+    return await Promise.race([
+      completed,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function installBlockingPrettierFixture(tempDir) {
@@ -106,6 +123,103 @@ export function installBlockingPrettierFixture(tempDir) {
       "",
     ].join("\n"),
   );
+}
+
+function interruptibleRunnerSource() {
+  const worker = [
+    'const fs = require("node:fs");',
+    'const { setTimeout: delay } = require("node:timers/promises");',
+    "(async () => {",
+    "  fs.writeFileSync(process.env.INTERRUPT_DESCENDANT_PID, String(process.pid));",
+    '  fs.writeFileSync(process.env.INTERRUPT_READY, "ready\\n");',
+    "  while (!fs.existsSync(process.env.INTERRUPT_RELEASE)) await delay(10);",
+    "  fs.writeFileSync(",
+    "    process.env.INTERRUPT_MUTATION_TARGET,",
+    "    process.env.INTERRUPT_MUTATION_CONTENT,",
+    "  );",
+    "  setInterval(() => {}, 1000);",
+    "})();",
+  ].join("\n");
+  return [
+    'import fs from "node:fs";',
+    'import { spawn } from "node:child_process";',
+    "process.stdin.resume();",
+    "fs.writeFileSync(process.env.INTERRUPT_PARENT_PID, String(process.pid));",
+    "spawn(process.execPath,",
+    `  ["-e", ${JSON.stringify(worker)}],`,
+    '  { stdio: ["ignore", "inherit", "inherit"], env: process.env },',
+    ");",
+    "setInterval(() => {}, 1000);",
+    "",
+  ].join("\n");
+}
+
+/**
+ * Install a deterministic command whose descendant attempts a delayed file
+ * mutation only after the test releases it. The descendant inherits the
+ * command's output pipes so cancellation must close the complete process tree.
+ * @param {string} tempDir - Disposable repository root.
+ * @param {object} options - Fixture target and installation mode.
+ * @param {string} options.target - Absolute path the survivor would overwrite.
+ * @param {string} options.mutation - Bytes the survivor would write.
+ * @param {boolean} [options.asPrettier] - Install as the project-local Prettier.
+ * @returns {{command: string[], env: object, ready: string, release: () => void, cleanup: () => void}} Fixture controls.
+ */
+export function installInterruptibleProcessFixture(
+  tempDir,
+  { target, mutation, asPrettier = false },
+) {
+  const fixtureDir = path.join(tempDir, ".git", "interruptible-process");
+  fs.mkdirSync(fixtureDir, { recursive: true });
+  const runnerPath = asPrettier
+    ? path.join(tempDir, "node_modules", "prettier", "bin", "prettier.mjs")
+    : path.join(fixtureDir, "runner.mjs");
+  if (asPrettier) {
+    const nodeModules = path.join(tempDir, "node_modules");
+    const current = fs.lstatSync(nodeModules);
+    if (current.isSymbolicLink()) {
+      fs.unlinkSync(nodeModules);
+    } else {
+      fs.rmSync(nodeModules, { recursive: true });
+    }
+    writeFile(
+      path.join(nodeModules, "prettier", "package.json"),
+      `${JSON.stringify({ name: "prettier", bin: "bin/prettier.mjs" })}\n`,
+    );
+  }
+  writeFile(runnerPath, interruptibleRunnerSource());
+
+  const ready = path.join(fixtureDir, "ready");
+  const release = path.join(fixtureDir, "release");
+  const parentPid = path.join(fixtureDir, "parent-pid");
+  const descendantPid = path.join(fixtureDir, "descendant-pid");
+  const env = {
+    INTERRUPT_READY: ready,
+    INTERRUPT_RELEASE: release,
+    INTERRUPT_PARENT_PID: parentPid,
+    INTERRUPT_DESCENDANT_PID: descendantPid,
+    INTERRUPT_MUTATION_TARGET: target,
+    INTERRUPT_MUTATION_CONTENT: mutation,
+  };
+
+  return {
+    command: [process.execPath, runnerPath],
+    env,
+    ready,
+    release: () => writeFile(release, "release\n"),
+    cleanup() {
+      for (const pidFile of [descendantPid, parentPid]) {
+        if (!fs.existsSync(pidFile)) {
+          continue;
+        }
+        try {
+          process.kill(Number(fs.readFileSync(pidFile, "utf8")), "SIGKILL");
+        } catch {
+          // Successful cancellation already removed the fixture process.
+        }
+      }
+    },
+  };
 }
 
 export function writeFile(filePath, content) {

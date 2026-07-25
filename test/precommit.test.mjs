@@ -6,14 +6,19 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
 import { countTerminalBoxes } from "./helpers/output.mjs";
 import {
   cleanupTempRepo,
   createTempRepo,
   fakeGitEnv,
+  installInterruptibleProcessFixture,
   readFile,
   run,
+  runAsync,
   setPrecommitConfig,
+  waitForCompletion,
+  waitForPath,
   writeCrossPlatformShim,
   writeFile,
 } from "./helpers/temp-repo.mjs";
@@ -66,6 +71,59 @@ test("explicit precommit still runs when hook-only skips are configured", (t) =>
   assert.equal(result.status, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).command, "precommit");
 });
+
+test(
+  "precommit cancels custom-runner descendants before exiting on SIGHUP",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const tempDir = createTempRepo();
+    const target = path.join(tempDir, "test", "interrupt.test.mjs");
+    const original = "export const safe = true;\n";
+    const mutation = "export const survivor = true;\n";
+    writeFile(target, original);
+    const fixture = installInterruptibleProcessFixture(tempDir, {
+      target,
+      mutation,
+    });
+    setPrecommitConfig(tempDir, {
+      requireTests: false,
+      runStagedTests: true,
+      testCommand: fixture.command,
+    });
+    run("git", ["add", "test/interrupt.test.mjs"], tempDir);
+    const execution = runAsync(
+      process.execPath,
+      [path.join(tempDir, "scripts", "precommit.mjs")],
+      tempDir,
+      { env: { ...process.env, ...fixture.env } },
+    );
+    t.after(() => {
+      execution.child.kill("SIGKILL");
+      fixture.cleanup();
+      cleanupTempRepo(tempDir);
+    });
+
+    await waitForPath(fixture.ready);
+    execution.child.kill("SIGHUP");
+    const result = await waitForCompletion(
+      execution.completed,
+      "precommit did not finish cancellation",
+    );
+    const bytesAtExit = readFile(tempDir, "test/interrupt.test.mjs");
+
+    fixture.release();
+    await delay(250);
+
+    assert.equal(result.status, null);
+    assert.equal(result.signal, "SIGHUP");
+    assert.equal(bytesAtExit, original);
+    assert.equal(readFile(tempDir, "test/interrupt.test.mjs"), original);
+    assert.equal(
+      run("git", ["show", ":test/interrupt.test.mjs"], tempDir).stdout,
+      original,
+    );
+  },
+);
 
 test("shows commit:fix for fully auto-fixable warnings", (t) => {
   const tempDir = createTempRepo();

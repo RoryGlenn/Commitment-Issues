@@ -6,10 +6,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { EventEmitter } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
 import { MAX_TIMEOUT_MS } from "../scripts/lib/config.mjs";
 import {
   batchProcessArguments,
+  createProcessInterruptionManager,
   detachedForPlatform,
   estimatedProcessArgumentUnits,
   isNodeTestCommand,
@@ -330,6 +332,123 @@ test("process-tree cleanup covers POSIX and Windows recovery strategies", () => 
 
   assert.equal(detachedForPlatform("win32"), false);
   assert.equal(detachedForPlatform("linux"), true);
+});
+
+function fakeSignalProcess({ killError = null } = {}) {
+  const target = new EventEmitter();
+  target.pid = 4242;
+  target.kills = [];
+  target.exits = [];
+  target.kill = (pid, signal) => {
+    target.kills.push([pid, signal]);
+    if (killError) {
+      throw killError;
+    }
+  };
+  target.exit = (status) => target.exits.push(status);
+  return target;
+}
+
+const interruptionSignals = ["SIGHUP", "SIGINT", "SIGTERM"];
+
+test("process interruption owns active, timed-out, and late child trees", () => {
+  const targetProcess = fakeSignalProcess();
+  const terminations = [];
+  const manager = createProcessInterruptionManager({
+    targetProcess,
+    platform: "linux",
+    terminate: (child) => {
+      terminations.push(child.pid);
+      return `tree-${child.pid}`;
+    },
+  });
+  const first = manager.track({ pid: 1 });
+  const second = manager.track({ pid: 2 });
+
+  assert.equal(first.terminate(), "tree-1");
+  assert.equal(first.terminate(), "tree-1");
+  assert.deepEqual(terminations, [1]);
+  assert.equal(targetProcess.listenerCount("SIGINT"), 1);
+
+  targetProcess.emit("SIGINT");
+  targetProcess.emit("SIGTERM");
+  assert.equal(manager.isInterrupted(), true);
+  assert.deepEqual(terminations, [1, 2]);
+
+  const late = manager.track({ pid: 3 });
+  assert.deepEqual(terminations, [1, 2, 3]);
+  first.release();
+  first.release();
+  second.release();
+  assert.deepEqual(targetProcess.kills, []);
+  late.release();
+
+  assert.deepEqual(targetProcess.kills, [[4242, "SIGINT"]]);
+  assert.deepEqual(targetProcess.exits, []);
+  for (const signal of interruptionSignals) {
+    assert.equal(targetProcess.listenerCount(signal), 0);
+  }
+
+  const afterExit = manager.track({ pid: 4 });
+  afterExit.release();
+  assert.deepEqual(terminations, [1, 2, 3, 4]);
+  assert.deepEqual(targetProcess.kills, [[4242, "SIGINT"]]);
+});
+
+test("process interruption removes idle handlers after normal completion", () => {
+  const targetProcess = fakeSignalProcess();
+  const manager = createProcessInterruptionManager({
+    targetProcess,
+    terminate: () => "already-exited",
+  });
+  const tracked = manager.track({ pid: 1 });
+
+  tracked.release();
+
+  assert.equal(manager.isInterrupted(), false);
+  for (const signal of interruptionSignals) {
+    assert.equal(targetProcess.listenerCount(signal), 0);
+  }
+});
+
+test("process interruption uses conventional Windows signal status", () => {
+  for (const [signal, status] of [
+    ["SIGHUP", 129],
+    ["SIGINT", 130],
+    ["SIGTERM", 143],
+  ]) {
+    const targetProcess = fakeSignalProcess();
+    const manager = createProcessInterruptionManager({
+      targetProcess,
+      platform: "win32",
+      terminate: () => "taskkill-tree",
+    });
+    const tracked = manager.track({ pid: 1 });
+
+    targetProcess.emit(signal);
+    tracked.release();
+
+    assert.deepEqual(targetProcess.kills, []);
+    assert.deepEqual(targetProcess.exits, [status]);
+  }
+});
+
+test("process interruption falls back to signal status when re-signal fails", () => {
+  const targetProcess = fakeSignalProcess({
+    killError: new Error("cannot re-signal"),
+  });
+  const manager = createProcessInterruptionManager({
+    targetProcess,
+    platform: "darwin",
+    terminate: () => "process-group",
+  });
+  const tracked = manager.track({ pid: 1 });
+
+  targetProcess.emit("SIGTERM");
+  tracked.release();
+
+  assert.deepEqual(targetProcess.kills, [[4242, "SIGTERM"]]);
+  assert.deepEqual(targetProcess.exits, [143]);
 });
 
 test("toolInvocation resolves only from the selected project", () => {

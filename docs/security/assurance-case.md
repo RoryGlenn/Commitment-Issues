@@ -163,7 +163,8 @@ The project combines local validation, tests, linting, formatting, CI on multipl
   tags or known remote refs.
 - Mutable project files and fixer targets bind device, inode, link count, and
   timestamps. Existing hardlinked repository paths are replaced rather than
-  overwritten, preserving external aliases; mid-run link changes fail closed.
+  overwritten, preserving external aliases; co-selected aliases are rejected
+  before mutation, and mid-run link changes fail closed.
 - Path normalization and Git parsing cover POSIX and Windows-style separators,
   spaces, tabs, newlines, quotes, shell metacharacters, leading hyphens,
   Unicode, and diff content that resembles metadata.

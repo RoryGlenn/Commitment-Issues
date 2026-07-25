@@ -194,7 +194,8 @@ For an existing file with multiple hardlinks, replacement changes only the
 repository directory entry: every other link keeps the original inode and
 bytes. Device, inode, link count, birth time, and change time are bound to the
 inspection, so a link added or removed before commit is treated as a concurrent
-change and the command refuses.
+change and the command refuses. Fix commands also refuse a selected target set
+containing two paths to the same inode before tools run or any path is replaced.
 
 An ordinary failure cleans up only the exact transaction file opened by that
 invocation. A forced termination can leave the reserved stage behind; a later

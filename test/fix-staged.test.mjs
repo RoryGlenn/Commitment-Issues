@@ -175,6 +175,36 @@ test("fix-staged breaks a target hardlink without changing external bytes", (t) 
   );
 });
 
+test("fix-staged refuses co-selected hardlink aliases before mutation", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const first = path.join(tempDir, "src", "hardlink-first.json");
+  const second = path.join(tempDir, "src", "hardlink-second.json");
+  const originalContent = '{"alpha":1}\n';
+  writeFile(first, originalContent);
+  if (!createHardlinkOrSkip(t, first, second)) {
+    return;
+  }
+  run(
+    "git",
+    ["add", "src/hardlink-first.json", "src/hardlink-second.json"],
+    tempDir,
+  );
+  const initialIndex = run("git", ["write-tree"], tempDir).stdout.trim();
+
+  const result = runFixStaged(tempDir);
+
+  assert.equal(result.status, 1);
+  assert.match(
+    `${result.stdout}${result.stderr}`,
+    /Unable to apply automatic fixes safely/,
+  );
+  assert.equal(fs.readFileSync(first, "utf8"), originalContent);
+  assert.equal(fs.readFileSync(second, "utf8"), originalContent);
+  assert.equal(fs.lstatSync(first).nlink, 2);
+  assert.equal(run("git", ["write-tree"], tempDir).stdout.trim(), initialIndex);
+});
+
 test("handles shell-sensitive staged filenames safely", (t) => {
   const tempDir = createTempRepo();
   t.after(() => cleanupTempRepo(tempDir));

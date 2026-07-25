@@ -125,14 +125,16 @@ project paths. Before staging, the command rechecks `HEAD`, the exact index
 file and tree, and target bytes, then places only known tool output into a
 prepared index under Git's lock. Existing hardlinked targets are atomically
 replaced at the repository path, so other links to the original inode keep
-their original bytes. Link count is part of the captured identity; a link added
-or removed while tools run makes revalidation fail. `commit:fix` also requires
-`HEAD` to remain on the same local branch, refuses commit signature headers,
-and repeats repository, worktree, tag, and remote-tracking-ref checks
-immediately before amending. If revalidation detects that another process
-edited, deleted, replaced, linked, staged, committed, attached a protected ref,
-or changed the active branch during the run, the command refuses and leaves
-that work out of its mutation.
+their original bytes. Two selected paths that already share an inode are
+refused before tools run, because replacing one would change the other's link
+count inside the transaction. Link count is part of the captured identity; a
+link added or removed while tools run makes revalidation fail. `commit:fix`
+also requires `HEAD` to remain on the same local branch, refuses commit
+signature headers, and repeats repository, worktree, tag, and
+remote-tracking-ref checks immediately before amending. If revalidation detects
+that another process edited, deleted, replaced, linked, staged, committed,
+attached a protected ref, or changed the active branch during the run, the
+command refuses and leaves that work out of its mutation.
 
 Publication proof is deliberately offline: local tags and remote-tracking refs
 are authoritative inputs, but a ref that exists only on a remote cannot be

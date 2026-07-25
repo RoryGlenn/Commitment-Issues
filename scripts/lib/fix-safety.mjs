@@ -225,6 +225,16 @@ export function captureFixSnapshot(files, { allowUnbornHead = false } = {}) {
   const indexFile = captureIndexFile(indexPath);
   const entries = targetEntries(uniqueFiles);
   const targets = entries.map(captureTarget);
+  const targetIdentities = new Set();
+  for (const target of targets) {
+    const identity = `${target.state.stats.dev}:${target.state.stats.ino}`;
+    if (targetIdentities.has(identity)) {
+      throw inspectionError(
+        `Fix targets share a hardlinked file: ${target.file}`,
+      );
+    }
+    targetIdentities.add(identity);
+  }
 
   return {
     allowUnbornHead,

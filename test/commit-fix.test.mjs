@@ -12,6 +12,7 @@ import {
   addBareRemote,
   cleanupTempRepo,
   createExternalHardlink,
+  createHardlinkOrSkip,
   createTempRepo,
   fakeGitEnv,
   installBlockingPrettierFixture,
@@ -247,6 +248,40 @@ test("commit-fix breaks a target hardlink without changing external bytes", (t) 
       fs.lstatSync(linked.outsidePath, { bigint: true }).dev,
       fs.lstatSync(linked.outsidePath, { bigint: true }).ino,
     ],
+  );
+});
+
+test("commit-fix refuses co-selected hardlink aliases before mutation", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const first = path.join(tempDir, "src", "hardlink-first.json");
+  const second = path.join(tempDir, "src", "hardlink-second.json");
+  const originalContent = '{"alpha":1}\n';
+  writeFile(first, originalContent);
+  if (!createHardlinkOrSkip(t, first, second)) {
+    return;
+  }
+  run(
+    "git",
+    ["add", "src/hardlink-first.json", "src/hardlink-second.json"],
+    tempDir,
+  );
+  run("git", ["commit", "-m", "hardlinked targets"], tempDir);
+  const originalHead = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+
+  const result = runCommitFix(tempDir);
+
+  assert.equal(result.status, 1);
+  assert.match(
+    `${result.stdout}${result.stderr}`,
+    /Unable to apply automatic fixes safely/,
+  );
+  assert.equal(fs.readFileSync(first, "utf8"), originalContent);
+  assert.equal(fs.readFileSync(second, "utf8"), originalContent);
+  assert.equal(fs.lstatSync(first).nlink, 2);
+  assert.equal(
+    run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+    originalHead,
   );
 });
 

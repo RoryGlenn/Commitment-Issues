@@ -455,7 +455,8 @@ production-readiness workstream #130 is consolidated in the
   `test/fun-tone.test.mjs`.
 - **CFIX-015** — a hardlinked fixer target is atomically replaced only at the
   repository path; the external alias retains its original inode bytes while
-  the amended commit receives the fixed bytes. Fixture:
+  the amended commit receives the fixed bytes. Two selected paths sharing one
+  inode are refused before either path or `HEAD` changes. Fixture:
   `test/commit-fix.test.mjs`.
 
 ### Staged fixes
@@ -478,9 +479,10 @@ production-readiness workstream #130 is consolidated in the
   `test/fix-staged.test.mjs`, `test/message.test.mjs`,
   `test/fun-tone.test.mjs`.
 - **STG-012** — a hardlinked target is replaced only at the repository path,
-  preserving the external alias; a hardlink added while a fixer runs is
-  detected through link-count revalidation and refused before staging.
-  Unit/fixture: `test/lib-files.test.mjs`, `test/fix-staged.test.mjs`.
+  preserving the external alias. Co-selected aliases to one inode are refused
+  before either path changes; a hardlink added while a fixer runs is detected
+  through link-count revalidation and refused before staging. Unit/fixture:
+  `test/lib-files.test.mjs`, `test/fix-staged.test.mjs`.
 
 ### Doctor and hook health
 

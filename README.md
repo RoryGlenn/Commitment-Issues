@@ -156,7 +156,8 @@ manager's install command; the hook does not ask `npx` to download it.
 - **Advisory adoption:** warnings first; enforcement is per-check opt-in.
 - **Safe explicit fixes:** ambiguous partial staging, dirty tracked worktrees,
   detached or signed commits, and history retained by a local tag or known
-  remote-tracking ref are refused.
+  remote-tracking ref are refused. Hardlinked targets are replaced only at the
+  repository path, preserving every other alias to the original inode.
 - **Related push tests:** runs tests associated with the files being pushed.
 - **Debug-junk advisory:** optionally catches common temporary instrumentation
   only on newly staged lines.

@@ -458,6 +458,7 @@ function sameProjectFileIdentity(left, right) {
   return (
     left.dev === right.dev &&
     left.ino === right.ino &&
+    left.nlink === right.nlink &&
     left.ctimeNs === right.ctimeNs &&
     left.birthtimeNs === right.birthtimeNs
   );

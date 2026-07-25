@@ -113,6 +113,61 @@ export function writeFile(filePath, content) {
   fs.writeFileSync(filePath, content);
 }
 
+const HARDLINK_UNSUPPORTED_CODES = new Set([
+  "EACCES",
+  "ENOSYS",
+  "ENOTSUP",
+  "EOPNOTSUPP",
+  "EPERM",
+  "EXDEV",
+]);
+
+/**
+ * Create a hardlink or skip the current test with a filesystem-specific reason.
+ * @param {{skip: (message: string) => void}} t - Node test context.
+ * @param {string} source - Existing source path.
+ * @param {string} destination - New hardlink path.
+ * @returns {boolean} Whether the hardlink was created.
+ */
+export function createHardlinkOrSkip(t, source, destination) {
+  try {
+    fs.linkSync(source, destination);
+    return true;
+  } catch (error) {
+    if (HARDLINK_UNSUPPORTED_CODES.has(error?.code)) {
+      t.skip(`hardlinks are unavailable on this filesystem: ${error.code}`);
+      return false;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Replace a repository file with a hardlink to bytes stored outside the repo.
+ * The external fixture uses the repository's temp parent to stay on the same
+ * filesystem.
+ * @param {{after: (cleanup: () => void) => void, skip: (message: string) => void}} t - Node test context.
+ * @param {string} tempDir - Disposable repository root.
+ * @param {string} relativePath - Repository-relative destination.
+ * @param {string} content - Shared initial content.
+ * @returns {{outsidePath: string, projectPath: string}|null} Linked paths, or null after a skip.
+ */
+export function createExternalHardlink(t, tempDir, relativePath, content) {
+  const outsideDir = fs.mkdtempSync(
+    path.join(path.dirname(tempDir), "commitment-hardlink-outside-"),
+  );
+  t.after(() => fs.rmSync(outsideDir, { recursive: true, force: true }));
+  const outsidePath = path.join(outsideDir, path.basename(relativePath));
+  const projectPath = path.join(tempDir, ...relativePath.split("/"));
+  writeFile(outsidePath, content);
+  fs.mkdirSync(path.dirname(projectPath), { recursive: true });
+  fs.rmSync(projectPath, { force: true });
+  if (!createHardlinkOrSkip(t, outsidePath, projectPath)) {
+    return null;
+  }
+  return { outsidePath, projectPath };
+}
+
 export function fsFailurePreload(tempDir) {
   const preloadPath = path.join(tempDir, "fs-failure-preload.mjs");
   writeFile(

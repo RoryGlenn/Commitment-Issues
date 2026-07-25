@@ -161,6 +161,9 @@ The project combines local validation, tests, linting, formatting, CI on multipl
 - `fix:staged` refuses partially staged files, and `commit:fix` refuses dirty
   tracked worktrees, detached or signed commits, and commits retained by local
   tags or known remote refs.
+- Mutable project files and fixer targets bind device, inode, link count, and
+  timestamps. Existing hardlinked repository paths are replaced rather than
+  overwritten, preserving external aliases; mid-run link changes fail closed.
 - Path normalization and Git parsing cover POSIX and Windows-style separators,
   spaces, tabs, newlines, quotes, shell metacharacters, leading hyphens,
   Unicode, and diff content that resembles metadata.

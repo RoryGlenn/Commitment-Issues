@@ -13,6 +13,7 @@ import {
 } from "./helpers/output.mjs";
 import {
   cleanupTempRepo,
+  createExternalHardlink,
   createTempRepo,
   fakeGitEnv,
   fsFailurePreload,
@@ -1188,6 +1189,76 @@ test("init validates integration option cardinality before writes", (t) => {
     /may be supplied only once/,
   );
   assert.equal(readFile(tempDir, "package.json"), packageBefore);
+});
+
+test("init replaces a hardlinked package without changing the external inode", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  writePackage(tempDir, { name: "consumer", version: "1.0.0" });
+  const packageBefore = readFile(tempDir, "package.json");
+  const linked = createExternalHardlink(
+    t,
+    tempDir,
+    "package.json",
+    packageBefore,
+  );
+  if (!linked) {
+    return;
+  }
+  assert.equal(fs.lstatSync(linked.outsidePath).nlink, 2);
+
+  const result = runInit(tempDir);
+
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  assert.equal(fs.readFileSync(linked.outsidePath, "utf8"), packageBefore);
+  assert.equal(fs.lstatSync(linked.outsidePath).nlink, 1);
+  assert.notEqual(readFile(tempDir, "package.json"), packageBefore);
+  assert.notDeepEqual(
+    [
+      fs.lstatSync(linked.projectPath, { bigint: true }).dev,
+      fs.lstatSync(linked.projectPath, { bigint: true }).ino,
+    ],
+    [
+      fs.lstatSync(linked.outsidePath, { bigint: true }).dev,
+      fs.lstatSync(linked.outsidePath, { bigint: true }).ino,
+    ],
+  );
+  assert.equal(readPackage(tempDir).scripts.prepare.includes("doctor"), true);
+});
+
+test("init replaces a hardlinked gitignore without changing the external inode", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  writePackage(tempDir, { name: "consumer", version: "1.0.0" });
+  const gitignoreBefore = "custom-cache/\n";
+  const linked = createExternalHardlink(
+    t,
+    tempDir,
+    ".gitignore",
+    gitignoreBefore,
+  );
+  if (!linked) {
+    return;
+  }
+  assert.equal(fs.lstatSync(linked.outsidePath).nlink, 2);
+
+  const result = runInit(tempDir);
+
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  assert.equal(fs.readFileSync(linked.outsidePath, "utf8"), gitignoreBefore);
+  assert.equal(fs.lstatSync(linked.outsidePath).nlink, 1);
+  assert.match(readFile(tempDir, ".gitignore"), /^custom-cache\/$/mu);
+  assert.match(readFile(tempDir, ".gitignore"), /^node_modules\/$/mu);
+  assert.notDeepEqual(
+    [
+      fs.lstatSync(linked.projectPath, { bigint: true }).dev,
+      fs.lstatSync(linked.projectPath, { bigint: true }).ino,
+    ],
+    [
+      fs.lstatSync(linked.outsidePath, { bigint: true }).dev,
+      fs.lstatSync(linked.outsidePath, { bigint: true }).ino,
+    ],
+  );
 });
 
 for (const fileName of ["package.json", ".gitignore", ".commitmentrc.json"]) {

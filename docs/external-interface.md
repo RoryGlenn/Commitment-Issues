@@ -190,6 +190,11 @@ to its opened identity. The destination identity is then revalidated at the
 commit boundary. Existing files are replaced by same-filesystem rename so
 concurrent readers see complete old or new bytes, while a missing destination
 uses an atomic hard-link commit that refuses a concurrently inserted path.
+For an existing file with multiple hardlinks, replacement changes only the
+repository directory entry: every other link keeps the original inode and
+bytes. Device, inode, link count, birth time, and change time are bound to the
+inspection, so a link added or removed before commit is treated as a concurrent
+change and the command refuses.
 
 An ordinary failure cleans up only the exact transaction file opened by that
 invocation. A forced termination can leave the reserved stage behind; a later

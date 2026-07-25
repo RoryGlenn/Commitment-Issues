@@ -17,6 +17,7 @@ import {
 } from "./helpers/output.mjs";
 import {
   cleanupTempRepo,
+  createExternalHardlink,
   createTempRepo,
   fakeGitEnv,
   fsFailurePreload,
@@ -223,6 +224,58 @@ test("uninstall preserves hooks when standalone configuration removal fails", (t
   assert.equal(fs.existsSync(standalonePath), false);
   assert.equal(fs.existsSync(hookPath), false);
 });
+
+for (const fileName of ["package.json", ".commitmentrc.json"]) {
+  test(`uninstall handles a hardlinked ${fileName} without changing the external inode`, (t) => {
+    const tempDir = createTempRepo();
+    t.after(() => cleanupTempRepo(tempDir));
+    writePackage(tempDir, {
+      name: "consumer",
+      version: "1.0.0",
+      devDependencies: { "commitment-issues": "^3.5.0" },
+    });
+    if (fileName === ".commitmentrc.json") {
+      writeFile(
+        path.join(tempDir, fileName),
+        '{\n  "advisePushTests": true\n}\n',
+      );
+    }
+    assert.equal(runScript(tempDir, "init").status, 0);
+    const projectBefore = readFile(tempDir, fileName);
+    const linked = createExternalHardlink(t, tempDir, fileName, projectBefore);
+    if (!linked) {
+      return;
+    }
+    assert.equal(fs.lstatSync(linked.outsidePath).nlink, 2);
+
+    const preview = runScript(tempDir, "uninstall", ["--dry-run"]);
+    assert.equal(preview.status, 0, `${preview.stdout}${preview.stderr}`);
+    assert.equal(fs.readFileSync(linked.outsidePath, "utf8"), projectBefore);
+    assert.equal(fs.readFileSync(linked.projectPath, "utf8"), projectBefore);
+    assert.equal(fs.lstatSync(linked.outsidePath).nlink, 2);
+
+    const result = runScript(tempDir, "uninstall");
+
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+    assert.equal(fs.readFileSync(linked.outsidePath, "utf8"), projectBefore);
+    assert.equal(fs.lstatSync(linked.outsidePath).nlink, 1);
+    if (fileName === "package.json") {
+      assert.notEqual(readFile(tempDir, fileName), projectBefore);
+      assert.notDeepEqual(
+        [
+          fs.lstatSync(linked.projectPath, { bigint: true }).dev,
+          fs.lstatSync(linked.projectPath, { bigint: true }).ino,
+        ],
+        [
+          fs.lstatSync(linked.outsidePath, { bigint: true }).dev,
+          fs.lstatSync(linked.outsidePath, { bigint: true }).ino,
+        ],
+      );
+    } else {
+      assert.equal(fs.existsSync(linked.projectPath), false);
+    }
+  });
+}
 
 for (const fileName of ["package.json", ".commitmentrc.json"]) {
   test(`uninstall refuses a linked ${fileName} before changing project or hook state`, (t) => {

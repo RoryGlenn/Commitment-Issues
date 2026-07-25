@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Project-file and fixer transactions now treat hardlink count as part of file
+  identity. Existing hardlinked repository paths are replaced instead of
+  modified through the shared inode, so external aliases retain their original
+  bytes; co-selected fixer targets that share one inode are refused before
+  mutation, and a hardlink added or removed while tools run causes a
+  fail-closed refusal.
 - `commit:fix` now refuses detached or non-branch `HEAD`, signed commits, and
   commits retained by a local tag or locally known remote ref. It revalidates
   the exact branch attachment and protected-ref snapshot before mutation, and

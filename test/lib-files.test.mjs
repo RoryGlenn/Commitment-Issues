@@ -31,6 +31,7 @@ import {
   shortFileList,
   writeMutableProjectFile,
 } from "../scripts/lib/files.mjs";
+import { createHardlinkOrSkip } from "./helpers/temp-repo.mjs";
 
 function mutableProjectFileArtifacts(directory, basename) {
   const prefix = `.${basename}.commitment-issues-`;
@@ -486,7 +487,9 @@ test("mutable project file writes atomically replace existing files and exclusiv
   const missing = path.join(dir, ".gitignore");
   const originalContent = '{"before":true}\n';
   fs.writeFileSync(existing, originalContent, { mode: 0o640 });
-  fs.linkSync(existing, existingAlias);
+  if (!createHardlinkOrSkip(t, existing, existingAlias)) {
+    return;
+  }
 
   const existingState = inspectMutableProjectFile(existing);
   const missingState = inspectMutableProjectFile(missing);
@@ -507,6 +510,30 @@ test("mutable project file writes atomically replace existing files and exclusiv
   }
   assert.deepEqual(mutableProjectFileArtifacts(dir, "package.json"), []);
   assert.deepEqual(mutableProjectFileArtifacts(dir, ".gitignore"), []);
+});
+
+test("mutable project identities reject a hardlink added after inspection", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mutable-hardlink-race-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "package.json");
+  const alias = path.join(dir, "outside-alias.json");
+  const originalContent = '{"before":true}\n';
+  fs.writeFileSync(file, originalContent);
+  const state = inspectMutableProjectFile(file);
+  assert.equal(state.status, "regular");
+  assert.equal(state.stats.nlink, 1n);
+  if (!createHardlinkOrSkip(t, file, alias)) {
+    return;
+  }
+
+  assert.equal(fs.lstatSync(file, { bigint: true }).nlink, 2n);
+  assert.equal(mutableProjectFileUnchanged(state), false);
+  assert.throws(
+    () => writeMutableProjectFile(state, '{"after":true}\n'),
+    (error) => error.code === "ESTALE",
+  );
+  assert.equal(fs.readFileSync(file, "utf8"), originalContent);
+  assert.equal(fs.readFileSync(alias, "utf8"), originalContent);
 });
 
 test("mutable project file writes reject destination links inserted after inspection", (t) => {

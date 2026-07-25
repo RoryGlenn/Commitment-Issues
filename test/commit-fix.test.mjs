@@ -11,6 +11,8 @@ import { pathToFileURL } from "node:url";
 import {
   addBareRemote,
   cleanupTempRepo,
+  createExternalHardlink,
+  createHardlinkOrSkip,
   createTempRepo,
   fakeGitEnv,
   installBlockingPrettierFixture,
@@ -214,6 +216,73 @@ test("amends the latest commit when all fixes are automatic", (t) => {
   assert.equal(result.status, 0);
   assert.match(output, /Latest commit amended with automatic fixes\./);
   assert.equal(readHeadFile(tempDir, "src/amend.json"), '{ "alpha": 1 }\n');
+});
+
+test("commit-fix breaks a target hardlink without changing external bytes", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const file = "src/hardlinked.json";
+  const originalContent = '{"alpha":1}\n';
+  const fixedContent = '{ "alpha": 1 }\n';
+  const linked = createExternalHardlink(t, tempDir, file, originalContent);
+  if (!linked) {
+    return;
+  }
+  run("git", ["add", file], tempDir);
+  run("git", ["commit", "-m", "hardlinked target"], tempDir);
+  assert.equal(fs.lstatSync(linked.outsidePath).nlink, 2);
+
+  const result = runCommitFix(tempDir);
+
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  assert.equal(fs.readFileSync(linked.outsidePath, "utf8"), originalContent);
+  assert.equal(fs.lstatSync(linked.outsidePath).nlink, 1);
+  assert.equal(fs.readFileSync(linked.projectPath, "utf8"), fixedContent);
+  assert.equal(readHeadFile(tempDir, file), fixedContent);
+  assert.notDeepEqual(
+    [
+      fs.lstatSync(linked.projectPath, { bigint: true }).dev,
+      fs.lstatSync(linked.projectPath, { bigint: true }).ino,
+    ],
+    [
+      fs.lstatSync(linked.outsidePath, { bigint: true }).dev,
+      fs.lstatSync(linked.outsidePath, { bigint: true }).ino,
+    ],
+  );
+});
+
+test("commit-fix refuses co-selected hardlink aliases before mutation", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const first = path.join(tempDir, "src", "hardlink-first.json");
+  const second = path.join(tempDir, "src", "hardlink-second.json");
+  const originalContent = '{"alpha":1}\n';
+  writeFile(first, originalContent);
+  if (!createHardlinkOrSkip(t, first, second)) {
+    return;
+  }
+  run(
+    "git",
+    ["add", "src/hardlink-first.json", "src/hardlink-second.json"],
+    tempDir,
+  );
+  run("git", ["commit", "-m", "hardlinked targets"], tempDir);
+  const originalHead = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+
+  const result = runCommitFix(tempDir);
+
+  assert.equal(result.status, 1);
+  assert.match(
+    `${result.stdout}${result.stderr}`,
+    /Unable to apply automatic fixes safely/,
+  );
+  assert.equal(fs.readFileSync(first, "utf8"), originalContent);
+  assert.equal(fs.readFileSync(second, "utf8"), originalContent);
+  assert.equal(fs.lstatSync(first).nlink, 2);
+  assert.equal(
+    run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+    originalHead,
+  );
 });
 
 test("amends the latest commit and warns when lint issues remain", (t) => {

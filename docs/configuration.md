@@ -229,7 +229,10 @@ made absolute so Node cannot interpret a repository filename as an option.
 - When automatic fixes can still be applied safely after a commit, the hook suggests `npm run commit:fix`.
 - `npm run fix:staged` applies ESLint and Prettier to captured staged bytes,
   uses bounded tool concurrency under one shared timeout, revalidates
-  repository state, and stages only attributable output.
+  repository state, and stages only attributable output. A hardlinked target
+  is replaced at its repository path without modifying other inode aliases;
+  co-selected aliases to one inode are refused before mutation, and link-count
+  changes during the run are refused.
 - `npm run commit:fix` uses the same bounded fix transaction on the latest
   clean commit only when `HEAD` stays on one local branch, the commit is
   unsigned, and no local tag or remote-tracking ref contains it.

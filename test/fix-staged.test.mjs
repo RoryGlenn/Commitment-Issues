@@ -7,6 +7,8 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   cleanupTempRepo,
+  createExternalHardlink,
+  createHardlinkOrSkip,
   createTempRepo,
   fakeGitEnv,
   installBlockingPrettierFixture,
@@ -139,6 +141,68 @@ test("applies staged fixes successfully when all issues are auto-fixable", (t) =
   assert.equal(result.status, 0);
   assert.match(output, /Staged fixes applied\./);
   assert.equal(readFile(tempDir, "src/success.js"), 'console.log("x");\n');
+});
+
+test("fix-staged breaks a target hardlink without changing external bytes", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const file = "src/hardlinked.json";
+  const originalContent = '{"alpha":1}\n';
+  const fixedContent = '{ "alpha": 1 }\n';
+  const linked = createExternalHardlink(t, tempDir, file, originalContent);
+  if (!linked) {
+    return;
+  }
+  run("git", ["add", file], tempDir);
+  assert.equal(fs.lstatSync(linked.outsidePath).nlink, 2);
+
+  const result = runFixStaged(tempDir);
+
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  assert.equal(fs.readFileSync(linked.outsidePath, "utf8"), originalContent);
+  assert.equal(fs.lstatSync(linked.outsidePath).nlink, 1);
+  assert.equal(fs.readFileSync(linked.projectPath, "utf8"), fixedContent);
+  assert.equal(run("git", ["show", `:${file}`], tempDir).stdout, fixedContent);
+  assert.notDeepEqual(
+    [
+      fs.lstatSync(linked.projectPath, { bigint: true }).dev,
+      fs.lstatSync(linked.projectPath, { bigint: true }).ino,
+    ],
+    [
+      fs.lstatSync(linked.outsidePath, { bigint: true }).dev,
+      fs.lstatSync(linked.outsidePath, { bigint: true }).ino,
+    ],
+  );
+});
+
+test("fix-staged refuses co-selected hardlink aliases before mutation", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const first = path.join(tempDir, "src", "hardlink-first.json");
+  const second = path.join(tempDir, "src", "hardlink-second.json");
+  const originalContent = '{"alpha":1}\n';
+  writeFile(first, originalContent);
+  if (!createHardlinkOrSkip(t, first, second)) {
+    return;
+  }
+  run(
+    "git",
+    ["add", "src/hardlink-first.json", "src/hardlink-second.json"],
+    tempDir,
+  );
+  const initialIndex = run("git", ["write-tree"], tempDir).stdout.trim();
+
+  const result = runFixStaged(tempDir);
+
+  assert.equal(result.status, 1);
+  assert.match(
+    `${result.stdout}${result.stderr}`,
+    /Unable to apply automatic fixes safely/,
+  );
+  assert.equal(fs.readFileSync(first, "utf8"), originalContent);
+  assert.equal(fs.readFileSync(second, "utf8"), originalContent);
+  assert.equal(fs.lstatSync(first).nlink, 2);
+  assert.equal(run("git", ["write-tree"], tempDir).stdout.trim(), initialIndex);
 });
 
 test("handles shell-sensitive staged filenames safely", (t) => {
@@ -406,6 +470,39 @@ test("refuses a concurrent target auto-save without staging it", async (t) => {
   assert.match(output, /Repository state changed while automatic fixes/);
   assert.equal(readFile(tempDir, "src/race.json"), concurrent);
   assert.equal(run("git", ["show", ":src/race.json"], tempDir).stdout, initial);
+  assert.equal(run("git", ["write-tree"], tempDir).stdout.trim(), initialIndex);
+});
+
+test("refuses a hardlink added while staged fixers run", async (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const outsideDir = fs.mkdtempSync(
+    path.join(path.dirname(tempDir), "fix-hardlink-race-"),
+  );
+  t.after(() => fs.rmSync(outsideDir, { recursive: true, force: true }));
+  const file = path.join(tempDir, "src", "hardlink-race.json");
+  const alias = path.join(outsideDir, "hardlink-race.json");
+  const probe = path.join(outsideDir, "probe.json");
+  const initial = '{"alpha":1}\n';
+  writeFile(file, initial);
+  if (!createHardlinkOrSkip(t, file, probe)) {
+    return;
+  }
+  fs.rmSync(probe);
+  run("git", ["add", "src/hardlink-race.json"], tempDir);
+  const initialIndex = run("git", ["write-tree"], tempDir).stdout.trim();
+  installBlockingPrettierFixture(tempDir);
+
+  const result = await runFixStagedDuringPrettier(tempDir, () => {
+    fs.linkSync(file, alias);
+  });
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 1);
+  assert.match(output, /Repository state changed while automatic fixes/);
+  assert.equal(fs.lstatSync(file).nlink, 2);
+  assert.equal(fs.readFileSync(file, "utf8"), initial);
+  assert.equal(fs.readFileSync(alias, "utf8"), initial);
   assert.equal(run("git", ["write-tree"], tempDir).stdout.trim(), initialIndex);
 });
 

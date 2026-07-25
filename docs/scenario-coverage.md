@@ -317,7 +317,9 @@ production-readiness workstream #130 is consolidated in the
   every staging phase leaves complete old or new content, retries remove only
   dead-writer transaction files, concurrent readers never parse a partial
   file, original permission bits survive, and hooks remain untouched until all
-  required project-file writes complete. Unit/subprocess:
+  required project-file writes complete. Existing hardlinked package and
+  gitignore paths are replaced only inside the repository, preserving external
+  aliases. Unit/subprocess:
   `test/lib-files.test.mjs`, `test/init.test.mjs`.
 
 ## Uninstall
@@ -350,8 +352,9 @@ production-readiness workstream #130 is consolidated in the
 - **UNINST-020** — an interrupted or failed package replacement leaves complete
   project-file bytes and preserves standalone configuration plus generated hook
   state; retry safely completes removal and clears any dead-writer transaction
-  file. Unit/subprocess: `test/lib-files.test.mjs`,
-  `test/uninstall.test.mjs`.
+  file. Hardlinked package replacement and standalone-configuration removal
+  preserve the external alias, and dry-run changes neither link. Unit/subprocess:
+  `test/lib-files.test.mjs`, `test/uninstall.test.mjs`.
 
 ### Pre-commit checks
 
@@ -450,6 +453,11 @@ production-readiness workstream #130 is consolidated in the
   them; synthetic headers keep detection deterministic everywhere. Fixture:
   `test/commit-fix.test.mjs`; unit: `test/message.test.mjs`,
   `test/fun-tone.test.mjs`.
+- **CFIX-015** — a hardlinked fixer target is atomically replaced only at the
+  repository path; the external alias retains its original inode bytes while
+  the amended commit receives the fixed bytes. Two selected paths sharing one
+  inode are refused before either path or `HEAD` changes. Fixture:
+  `test/commit-fix.test.mjs`.
 
 ### Staged fixes
 
@@ -470,6 +478,11 @@ production-readiness workstream #130 is consolidated in the
   to `git status`. Unit/fixture: `test/fix-safety.test.mjs`,
   `test/fix-staged.test.mjs`, `test/message.test.mjs`,
   `test/fun-tone.test.mjs`.
+- **STG-012** — a hardlinked target is replaced only at the repository path,
+  preserving the external alias. Co-selected aliases to one inode are refused
+  before either path changes; a hardlink added while a fixer runs is detected
+  through link-count revalidation and refused before staging. Unit/fixture:
+  `test/lib-files.test.mjs`, `test/fix-staged.test.mjs`.
 
 ### Doctor and hook health
 

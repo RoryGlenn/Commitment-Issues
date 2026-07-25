@@ -258,9 +258,10 @@ export function assertFixSnapshotUnchanged(snapshot) {
   if (currentIndexPath() !== snapshot.indexPath) {
     throw changedError("The active Git index changed.");
   }
-  if (currentIndexTree() !== snapshot.indexTree) {
-    throw changedError("The Git index changed.");
-  }
+  // The exact file identity and bytes are stronger than a tree-only check.
+  // Do not run `git write-tree` against the live index here: some Git versions
+  // rewrite an equivalent index during that inspection, which would make the
+  // safety probe itself look like concurrent user work.
   assertIndexFileUnchanged(snapshot);
   assertFixTargetsUnchanged(snapshot);
 }
@@ -599,9 +600,6 @@ export function stageFixOutputs(snapshot) {
     }
     assertFixTargetsUnchanged(snapshot);
     const updated = { ...snapshot, indexTree: expectedTree };
-    if (currentIndexTree() !== expectedTree) {
-      throw applyError("The installed Git index did not match staged fixes.");
-    }
     assertIndexFileUnchanged({
       ...updated,
       indexState: installedIndex.state,

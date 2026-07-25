@@ -22,7 +22,6 @@ import {
   createTempRepo,
   fakeGitEnv,
   run as runCommand,
-  writeCrossPlatformShim,
   writeFile,
 } from "./helpers/temp-repo.mjs";
 
@@ -381,6 +380,37 @@ test("snapshot revalidation detects index metadata changes with the same tree", 
   assert.throws(
     () => inRepo(tempDir, () => assertFixSnapshotUnchanged(snapshot)),
     (error) => error.code === "ERR_FIX_STATE_CHANGED",
+  );
+});
+
+test("snapshot revalidation does not run a mutating live write-tree probe", (t) => {
+  const { tempDir, file } = createStagedTarget(t);
+  const snapshot = captureStagedTarget(tempDir, file);
+  const env = fakeGitEnv(tempDir, "write-tree");
+  const keys = [
+    "PATH",
+    "FAKE_GIT_MATCH",
+    "FAKE_GIT_EXIT",
+    "FAKE_GIT_STDOUT_BASE64",
+    "FAKE_GIT_STDERR_BASE64",
+    "FAKE_GIT_REAL",
+  ];
+  const original = new Map(keys.map((key) => [key, process.env[key]]));
+  t.after(() => {
+    for (const [key, value] of original) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  });
+  for (const key of keys) {
+    process.env[key] = env[key];
+  }
+
+  assert.doesNotThrow(() =>
+    inRepo(tempDir, () => assertFixSnapshotUnchanged(snapshot)),
   );
 });
 
@@ -855,64 +885,6 @@ test("stageFixOutputs verifies the installed index identity and bytes", (t) => {
   assert.throws(
     () => inRepo(tempDir, () => stageFixOutputs(applied)),
     (error) => error.code === "ERR_FIX_STATE_CHANGED",
-  );
-});
-
-test("stageFixOutputs verifies the installed index tree", (t) => {
-  const { tempDir, file } = createStagedTarget(t);
-  const snapshot = captureStagedTarget(tempDir, file);
-  const applied = inRepo(tempDir, () =>
-    applyFixOutputs(snapshot, fixedOutputs(snapshot)),
-  );
-  const env = fakeGitEnv(tempDir, "__never_match_git__");
-  const binDir = env.PATH.split(path.delimiter)[0];
-  const counterPath = path.join(tempDir, ".write-tree-count");
-  writeCrossPlatformShim(
-    binDir,
-    "git",
-    `import fs from "node:fs";
-import { spawnSync } from "node:child_process";
-const args = process.argv.slice(2);
-if (args.join(" ") === "write-tree" && !process.env.GIT_INDEX_FILE) {
-  const counter = process.env.FAKE_GIT_COUNTER;
-  const count = fs.existsSync(counter)
-    ? Number(fs.readFileSync(counter, "utf8")) + 1
-    : 1;
-  fs.writeFileSync(counter, String(count));
-  if (count === 2) {
-    process.stdout.write("${"0".repeat(40)}\\n");
-    process.exit(0);
-  }
-}
-const result = spawnSync(process.env.FAKE_GIT_REAL || "git", args, {
-  stdio: "inherit",
-});
-process.exit(result.status == null ? 1 : result.status);
-`,
-  );
-  const originalPath = process.env.PATH;
-  const originalRealGit = process.env.FAKE_GIT_REAL;
-  const originalCounter = process.env.FAKE_GIT_COUNTER;
-  t.after(() => {
-    process.env.PATH = originalPath;
-    if (originalRealGit === undefined) {
-      delete process.env.FAKE_GIT_REAL;
-    } else {
-      process.env.FAKE_GIT_REAL = originalRealGit;
-    }
-    if (originalCounter === undefined) {
-      delete process.env.FAKE_GIT_COUNTER;
-    } else {
-      process.env.FAKE_GIT_COUNTER = originalCounter;
-    }
-  });
-  process.env.PATH = env.PATH;
-  process.env.FAKE_GIT_REAL = env.FAKE_GIT_REAL;
-  process.env.FAKE_GIT_COUNTER = counterPath;
-
-  assert.throws(
-    () => inRepo(tempDir, () => stageFixOutputs(applied)),
-    (error) => error.code === "ERR_FIX_APPLY",
   );
 });
 

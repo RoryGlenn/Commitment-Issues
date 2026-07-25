@@ -446,12 +446,14 @@ export function detachedForPlatform(platform) {
 }
 
 const SIGNAL_EXIT_CODES = { SIGHUP: 129, SIGINT: 130, SIGTERM: 143 };
+const PROCESS_CLEANUP_GRACE_MS = 1000;
 
 /** Create invocation-wide process-tree signal ownership. */
 export function createProcessInterruptionManager({
   targetProcess = process,
   platform = process.platform,
   terminate = terminateProcessTree,
+  cleanupGraceMs = PROCESS_CLEANUP_GRACE_MS,
 } = {}) {
   const signals = Object.keys(SIGNAL_EXIT_CODES);
   const trees = new Set();
@@ -483,9 +485,28 @@ export function createProcessInterruptionManager({
     }
   }
 
+  function release(entry) {
+    if (!trees.delete(entry)) return;
+    clearTimeout(entry.timer);
+    entry.resolveDone();
+    if (!parentSignal && trees.size === 0) listen("off");
+    finishInterruption();
+  }
+
   function stop(entry) {
     if (!entry.cleanup) {
       entry.cleanup = terminate(entry.child);
+      entry.timer = setTimeout(() => {
+        for (const stream of [
+          entry.child.stdin,
+          entry.child.stdout,
+          entry.child.stderr,
+        ]) {
+          stream?.destroy?.();
+        }
+        entry.child.unref?.();
+        release(entry);
+      }, cleanupGraceMs);
     }
     return entry.cleanup;
   }
@@ -501,17 +522,18 @@ export function createProcessInterruptionManager({
 
   return {
     track(child) {
-      const entry = { child };
+      let resolveDone;
+      const done = new Promise((resolve) => {
+        resolveDone = resolve;
+      });
+      const entry = { child, resolveDone };
       trees.add(entry);
       if (trees.size === 1 && !parentSignal) listen("on");
       if (parentSignal) stop(entry);
       return {
         terminate: () => stop(entry),
-        release() {
-          if (!trees.delete(entry)) return;
-          if (!parentSignal && trees.size === 0) listen("off");
-          finishInterruption();
-        },
+        release: () => release(entry),
+        done,
       };
     },
     isInterrupted: () => Boolean(parentSignal),
@@ -591,15 +613,26 @@ export function spawnAsync(command, args, options = {}) {
     let spawnError;
     let timeoutCleanup = null;
     const finish = (payload) => {
-      if (settled) {
+      if (settled || interruptionManager.isInterrupted()) {
         return;
       }
       settled = true;
       clearTimeout(timer);
       resolve(withOutcome(payload));
     };
+    const finishTimeout = () =>
+      finish({
+        error: undefined,
+        status: null,
+        signal: null,
+        stdout,
+        stderr,
+        timedOut: true,
+        cleanup: timeoutCleanup,
+      });
     const timer = setTimeout(() => {
       timeoutCleanup = trackedTree.terminate();
+      trackedTree.done.then(finishTimeout);
     }, timeoutMs);
 
     if (child.stdout) {
@@ -630,29 +663,14 @@ export function spawnAsync(command, args, options = {}) {
     child.on("error", (error) => {
       spawnError = error;
       if (!child.pid) {
-        const interrupted = interruptionManager.isInterrupted();
         trackedTree.release();
-        if (!interrupted) {
-          finish({ error, status: null, signal: null, stdout, stderr });
-        }
+        finish({ error, status: null, signal: null, stdout, stderr });
       }
     });
     child.on("close", (status, signal) => {
-      const interrupted = interruptionManager.isInterrupted();
       trackedTree.release();
-      if (interrupted) {
-        return;
-      }
       if (timeoutCleanup !== null) {
-        finish({
-          error: undefined,
-          status: null,
-          signal: null,
-          stdout,
-          stderr,
-          timedOut: true,
-          cleanup: timeoutCleanup,
-        });
+        finishTimeout();
         return;
       }
       finish({

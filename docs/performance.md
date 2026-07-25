@@ -95,11 +95,11 @@ sequentially under one overall configured timeout. A normal non-zero exit does
 not skip later batches, so findings and failures from every path are retained.
 A timeout, signal, or spawn failure stops later launches; the existing
 process-tree cleanup applies to the interrupted child. A parent `SIGINT`,
-`SIGTERM`, or `SIGHUP` terminates every active attached tree and waits for
-descendant pipe closure before the CLI exits; a timeout racing that signal
-reuses the same idempotent cleanup. Node's configured options remain before
-`--`, configured positional tests run once, discovered leading-hyphen paths
-remain unambiguous, and Git-local environment variables remain stripped.
+`SIGTERM`, or `SIGHUP` terminates every active attached tree and waits for pipe
+closure within a bounded cleanup grace; a timeout racing that signal reuses the
+same idempotent cleanup. Node's configured options remain before `--`,
+configured positional tests run once, discovered leading-hyphen paths remain
+unambiguous, and Git-local environment variables remain stripped.
 
 The pre-commit large-file guard no longer sends staged paths back to
 `git ls-files`. It reads the whole index once with `--stage -z`, parses the

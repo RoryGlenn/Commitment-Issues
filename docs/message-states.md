@@ -278,7 +278,8 @@ Shown when `runStagedTests` is enabled and a staged test file fails. The commit 
 </p>
 
 Shown when a spawned tool exceeds the configured timeout. Its attached process
-group/tree is terminated before the hook continues.
+group/tree is terminated before the hook continues; unreclaimable inherited
+pipes are released after a bounded cleanup grace.
 
 ### Tool crash
 

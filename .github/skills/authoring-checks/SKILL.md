@@ -38,9 +38,9 @@ Push pure logic **down into `scripts/lib/`** so it can be unit-tested directly; 
   integrations such as commitlint that must never fall back to npx/global/network.
 - `spawnAsync(command, args, options?)` — async spawn with the shared timeout
   and invocation-wide `SIGHUP`/`SIGINT`/`SIGTERM` process-tree cancellation.
-  Keep long-running commands on this boundary so the parent waits for attached
-  descendants and inherited pipes before preserving signal-appropriate exit
-  behavior.
+  Keep long-running commands on this boundary so attached descendants are
+  reclaimed and unreclaimable inherited pipes cannot outlive a bounded cleanup
+  grace before signal-appropriate exit.
 - `TOOL_TIMEOUT_MS` — default 120s ceiling so a hung tool can't wedge a commit; overridden by `precommitChecks.timeoutMs` (positive number).
 - `isPackageInstalled(name, cwd)` — **fs-based** walk up `node_modules/<name>/package.json`. Must stay fs-based: a package whose `exports` map hides `package.json` makes `require.resolve('<name>/package.json')` throw (false negative). Do not "simplify" it to `require.resolve`.
 

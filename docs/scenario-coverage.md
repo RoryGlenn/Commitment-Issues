@@ -652,8 +652,8 @@ production-readiness workstream #130 is consolidated in the
   evidence: [Measured baseline](performance.md#measured-baseline).
 - **PERF-006** — parent `SIGHUP`, `SIGINT`, and `SIGTERM` cancellation
   terminates all active attached POSIX process groups or Windows process trees,
-  waits for descendant and inherited-pipe closure, preserves signal-appropriate
-  parent termination, and shares idempotent cleanup with a racing timeout.
+  bounds inherited-pipe cleanup, preserves signal-appropriate parent
+  termination, and shares idempotent cleanup with a racing timeout.
   Unit/subprocess: `test/process.test.mjs`, `test/fix-staged.test.mjs`,
   `test/commit-fix.test.mjs`, `test/precommit.test.mjs`, and
   `test/prepush.test.mjs`; CI matrix: Ubuntu, macOS, Windows.

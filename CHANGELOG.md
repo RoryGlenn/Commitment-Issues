@@ -9,10 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Parent `SIGINT`, `SIGTERM`, and `SIGHUP` now terminate every active attached
-  tool tree and wait for descendant pipes before signal-appropriate exit.
-  Timeouts share this idempotent cleanup, preventing interrupted fix and hook
-  commands from leaving mutators behind.
+- Parent `SIGINT`, `SIGTERM`, and `SIGHUP` now terminate active attached tool
+  trees before signal-appropriate exit. Timeouts share this cleanup, and a
+  bounded fallback releases pipes held by unreclaimable escaped descendants.
 - Project-file and fixer transactions now treat hardlink count as part of file
   identity. Existing hardlinked repository paths are replaced instead of
   modified through the shared inode, so external aliases retain their original

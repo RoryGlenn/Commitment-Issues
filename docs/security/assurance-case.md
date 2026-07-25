@@ -157,9 +157,9 @@ The project combines local validation, tests, linting, formatting, CI on multipl
   ordinary nonzero exit, and success.
 - Timed commands terminate their attached POSIX process group or Windows process
   tree. Parent `SIGHUP`, `SIGINT`, and `SIGTERM` cancellation terminates every
-  active attached tree and waits for inherited pipes to close before preserving
-  signal-appropriate parent termination, with the documented limitation that
-  deliberately detached descendants are outside the portable cleanup boundary.
+  active attached tree, bounds inherited-pipe cleanup, and preserves
+  signal-appropriate parent termination. Deliberately detached descendants
+  remain outside the portable cleanup boundary.
 - `fix:staged` refuses partially staged files, and `commit:fix` refuses dirty
   tracked worktrees, detached or signed commits, and commits retained by local
   tags or known remote refs.

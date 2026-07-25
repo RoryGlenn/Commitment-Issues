@@ -395,6 +395,34 @@ test("process interruption owns active, timed-out, and late child trees", () => 
   assert.deepEqual(targetProcess.kills, [[4242, "SIGINT"]]);
 });
 
+test("process interruption bounds cleanup when inherited pipes stay open", async () => {
+  const targetProcess = fakeSignalProcess();
+  const destroyed = [];
+  const child = {
+    pid: 1,
+    stdin: { destroy: () => destroyed.push("stdin") },
+    stdout: { destroy: () => destroyed.push("stdout") },
+    stderr: { destroy: () => destroyed.push("stderr") },
+    unref: () => destroyed.push("child"),
+  };
+  const manager = createProcessInterruptionManager({
+    targetProcess,
+    platform: "linux",
+    terminate: () => "direct-child",
+    cleanupGraceMs: 1,
+  });
+  const tracked = manager.track(child);
+
+  targetProcess.emit("SIGTERM");
+  await tracked.done;
+
+  assert.deepEqual(destroyed, ["stdin", "stdout", "stderr", "child"]);
+  assert.deepEqual(targetProcess.kills, [[4242, "SIGTERM"]]);
+  for (const signal of interruptionSignals) {
+    assert.equal(targetProcess.listenerCount(signal), 0);
+  }
+});
+
 test("process interruption removes idle handlers after normal completion", () => {
   const targetProcess = fakeSignalProcess();
   const manager = createProcessInterruptionManager({
@@ -803,6 +831,42 @@ test("spawnAsync reports timeout separately and cleans up grandchildren", async 
   }
   assert.equal(beatAfterTimeout, beatAtTimeout);
 });
+
+test(
+  "spawnAsync bounds timeout cleanup when an escaped descendant keeps stdout open",
+  { skip: process.platform === "win32", timeout: 4000 },
+  async (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "process-pipe-"));
+    const pidFile = path.join(dir, "escaped-pid");
+    t.after(() => {
+      if (fs.existsSync(pidFile)) {
+        try {
+          process.kill(Number(fs.readFileSync(pidFile, "utf8")), "SIGKILL");
+        } catch {
+          // The escaped fixture may already have exited.
+        }
+      }
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
+    const parent = [
+      "const fs = require('node:fs');",
+      "const { spawn } = require('node:child_process');",
+      `const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: ['ignore', 'inherit', 'inherit'] });`,
+      `fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));`,
+      "child.unref();",
+      "setInterval(() => {}, 1000);",
+    ].join("\n");
+    const startedAt = Date.now();
+    const result = await spawnAsync(process.execPath, ["-e", parent], {
+      timeoutMs: 250,
+    });
+
+    assert.equal(result.outcome, "timeout");
+    assert.equal(result.cleanup, "process-group");
+    assert.ok(Date.now() - startedAt < 4000);
+    assert.equal(fs.existsSync(pidFile), true);
+  },
+);
 
 test("test environment still resolves path module", () => {
   assert.equal(path.basename("a/b.js"), "b.js");

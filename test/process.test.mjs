@@ -532,6 +532,31 @@ test("spawnAsync captures output and resolves a status", async () => {
   assert.equal(result.stderr, "err");
 });
 
+test("spawnAsync sends exact stdin and closes the stream", async () => {
+  const input = "first line\nsecond \u732b line\n";
+  const result = await spawnAsync(
+    process.execPath,
+    [
+      "-e",
+      "process.stdin.pipe(process.stdout); process.stdin.on('end', () => process.stderr.write('closed\\n'));",
+    ],
+    { input },
+  );
+
+  assert.equal(result.outcome, "success");
+  assert.equal(result.stdout, input);
+  assert.equal(result.stderr, "closed\n");
+});
+
+test("spawnAsync suppresses parent EPIPE when a child exits before reading", async () => {
+  const result = await spawnAsync(process.execPath, ["-e", "process.exit(0)"], {
+    input: Buffer.alloc(8 * 1024 * 1024, "x"),
+  });
+
+  assert.equal(result.outcome, "success");
+  assert.equal(result.status, 0);
+});
+
 test("spawnAsync resolves an error for a missing binary", async () => {
   const result = await spawnAsync("definitely-not-a-real-binary-xyz", []);
   assert.equal(result.outcome, "spawn-error");

@@ -6,14 +6,21 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { pathToFileURL } from "node:url";
 import {
   addBareRemote,
   cleanupTempRepo,
   createTempRepo,
   fakeGitEnv,
+  installBlockingPrettierFixture,
+  REAL_GIT,
+  readFile,
   readHeadFile,
   run,
+  runAsync,
   setPrecommitConfig,
+  waitForPath,
+  writeCrossPlatformShim,
   writeFile,
 } from "./helpers/temp-repo.mjs";
 
@@ -26,9 +33,106 @@ function runCommitFix(tempDir, options = {}) {
   );
 }
 
+async function runCommitFixDuringPrettier(tempDir, mutate, env = {}) {
+  const ready = path.join(tempDir, "fixer-ready");
+  const release = path.join(tempDir, "fixer-release");
+  const execution = runAsync(
+    process.execPath,
+    [path.join(tempDir, "scripts", "commit-fix.mjs")],
+    tempDir,
+    {
+      env: {
+        ...process.env,
+        ...env,
+        FIXER_OUTPUT: '{ "alpha": 1 }\n',
+        FIXER_READY: ready,
+        FIXER_RELEASE: release,
+      },
+    },
+  );
+  try {
+    await waitForPath(ready);
+    await mutate();
+  } finally {
+    writeFile(release, "release\n");
+  }
+  return execution.completed;
+}
+
+function prepareBlockingCommit(tempDir, file = "src/race.json") {
+  installBlockingPrettierFixture(tempDir);
+  run("git", ["rm", "--cached", "--force", "node_modules"], tempDir);
+  writeFile(path.join(tempDir, ...file.split("/")), '{"alpha":1}\n');
+  run("git", ["add", file], tempDir);
+  run("git", ["commit", "-m", "unformatted target"], tempDir);
+  return file;
+}
+
 function hideNodeModules(tempDir) {
   fs.unlinkSync(path.join(tempDir, "node_modules"));
   fs.mkdirSync(path.join(tempDir, "node_modules"));
+}
+
+function failMatchingGitAfterEnv(tempDir, matchSubstring, allowedCalls) {
+  const binDir = path.join(tempDir, ".fakebin-sequence");
+  const counter = path.join(tempDir, ".fake-git-count");
+  fs.mkdirSync(binDir, { recursive: true });
+  writeCrossPlatformShim(
+    binDir,
+    "git",
+    `import fs from "node:fs";
+import { spawnSync } from "node:child_process";
+const args = process.argv.slice(2);
+if (args.join(" ").includes(process.env.FAKE_GIT_MATCH)) {
+  const count = fs.existsSync(process.env.FAKE_GIT_COUNTER)
+    ? Number(fs.readFileSync(process.env.FAKE_GIT_COUNTER, "utf8"))
+    : 0;
+  fs.writeFileSync(process.env.FAKE_GIT_COUNTER, String(count + 1));
+  if (count >= Number(process.env.FAKE_GIT_ALLOWED_CALLS)) process.exit(1);
+}
+const result = spawnSync(process.env.FAKE_GIT_REAL, args, { stdio: "inherit" });
+process.exit(result.status == null ? 1 : result.status);
+`,
+  );
+  return {
+    ...process.env,
+    PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
+    FAKE_GIT_ALLOWED_CALLS: String(allowedCalls),
+    FAKE_GIT_COUNTER: counter,
+    FAKE_GIT_MATCH: matchSubstring,
+    FAKE_GIT_REAL: REAL_GIT,
+  };
+}
+
+function mutateAfterIndexInstallEnv(tempDir, targetFile) {
+  const preload = path.join(tempDir, "mutate-after-index-install.mjs");
+  writeFile(
+    preload,
+    `import fs from "node:fs";
+import path from "node:path";
+const originalRename = fs.renameSync;
+fs.renameSync = (source, destination) => {
+  const result = originalRename(source, destination);
+  if (
+    path.basename(String(source)) === "index.lock" &&
+    path.basename(String(destination)) === "index"
+  ) {
+    fs.writeFileSync(process.env.FIXER_LATE_MUTATION, "late user edit\\n");
+  }
+  return result;
+};
+`,
+  );
+  return {
+    ...process.env,
+    FIXER_LATE_MUTATION: path.join(tempDir, targetFile),
+    NODE_OPTIONS: [
+      process.env.NODE_OPTIONS,
+      `--import=${pathToFileURL(preload).href}`,
+    ]
+      .filter(Boolean)
+      .join(" "),
+  };
 }
 
 test("refuses to amend when tracked worktree changes exist", (t) => {
@@ -88,6 +192,7 @@ test("amends the latest commit and warns when lint issues remain", (t) => {
 
   assert.equal(result.status, 1);
   assert.match(output, /Latest commit amended with available fixes\./);
+  assert.match(output, /no-unused-vars/);
   assert.equal(readHeadFile(tempDir, "src/warn.js"), "const value = 1;\n");
 });
 
@@ -126,6 +231,71 @@ test("refuses to amend when the pushed check cannot run", (t) => {
 
   assert.equal(result.status, 1);
   assert.match(output, /Unable to verify the latest commit is unpushed\./);
+});
+
+test("fails closed when publication state cannot be revalidated", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  writeFile(path.join(tempDir, "src", "publication.json"), '{"alpha":1}\n');
+  run("git", ["add", "src/publication.json"], tempDir);
+  run("git", ["commit", "-m", "publication check"], tempDir);
+  const originalHead = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+  const env = failMatchingGitAfterEnv(tempDir, "branch -r --contains", 1);
+
+  const result = runCommitFix(tempDir, { env });
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 1);
+  assert.match(output, /Unable to revalidate publication state/);
+  assert.equal(
+    run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+    originalHead,
+  );
+});
+
+test("fails closed when the worktree cannot be revalidated", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  writeFile(path.join(tempDir, "src", "worktree.json"), '{"alpha":1}\n');
+  run("git", ["add", "src/worktree.json"], tempDir);
+  run("git", ["commit", "-m", "worktree check"], tempDir);
+  const originalHead = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+  const env = failMatchingGitAfterEnv(tempDir, "diff --name-only -z", 1);
+
+  const result = runCommitFix(tempDir, { env });
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 1);
+  assert.match(output, /Unable to revalidate the working tree/);
+  assert.equal(
+    run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+    originalHead,
+  );
+});
+
+test("refuses when HEAD changes before fixer inputs are captured", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  writeFile(path.join(tempDir, "src", "head.json"), '{"alpha":1}\n');
+  run("git", ["add", "src/head.json"], tempDir);
+  run("git", ["commit", "-m", "head check"], tempDir);
+  const originalHead = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+  const env = fakeGitEnv(
+    tempDir,
+    "rev-parse --verify --quiet HEAD",
+    0,
+    `${"0".repeat(40)}\n`,
+  );
+
+  const result = runCommitFix(tempDir, { env });
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 1);
+  assert.match(output, /Repository state changed while automatic fixes/);
+  assert.equal(
+    run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+    originalHead,
+  );
 });
 
 test("reports the latest commit is already clean when nothing changes", (t) => {
@@ -186,7 +356,7 @@ test("errors when the latest commit pathname output is malformed", (t) => {
   );
 });
 
-test("errors when fixed files cannot be staged", (t) => {
+test("errors when the exact fixed index cannot be prepared", (t) => {
   const tempDir = createTempRepo();
   t.after(() => cleanupTempRepo(tempDir));
 
@@ -194,16 +364,15 @@ test("errors when fixed files cannot be staged", (t) => {
   run("git", ["add", "src/amend.json"], tempDir);
   run("git", ["commit", "-m", "amend"], tempDir);
 
-  // Fixers run, then `git add -- <files>` fails.
-  const env = fakeGitEnv(tempDir, "add --");
+  const env = fakeGitEnv(tempDir, "update-index -z --index-info");
   const result = runCommitFix(tempDir, { env });
   const output = `${result.stdout}${result.stderr}`;
 
   assert.equal(result.status, 1);
-  assert.match(output, /files could not be staged/);
+  assert.match(output, /Unable to prepare exact staged fixes/);
 });
 
-test("errors when staged fixes cannot be inspected", (t) => {
+test("errors when fixed content cannot be stored as an exact blob", (t) => {
   const tempDir = createTempRepo();
   t.after(() => cleanupTempRepo(tempDir));
 
@@ -211,13 +380,12 @@ test("errors when staged fixes cannot be inspected", (t) => {
   run("git", ["add", "src/amend.json"], tempDir);
   run("git", ["commit", "-m", "amend"], tempDir);
 
-  // `git add` succeeds, but the follow-up `git diff --cached ... --` fails.
-  const env = fakeGitEnv(tempDir, "--cached --name-only -z --");
+  const env = fakeGitEnv(tempDir, "hash-object -w --stdin");
   const result = runCommitFix(tempDir, { env });
   const output = `${result.stdout}${result.stderr}`;
 
   assert.equal(result.status, 1);
-  assert.match(output, /Unable to inspect staged fixes/);
+  assert.match(output, /Unable to store fixed content/);
 });
 
 test("warns when a format-only file cannot be fixed automatically", (t) => {
@@ -297,7 +465,7 @@ test("commit-fix timeout cleans up fixer descendants", async (t) => {
   );
   writeFile(
     path.join(tempDir, "node_modules", "prettier", "bin", "prettier.mjs"),
-    "process.exit(0);\n",
+    "process.stdin.pipe(process.stdout);\n",
   );
   // The fixture repo tracks its original node_modules symlink. Remove that
   // link from the index in this commit; the replacement directory stays
@@ -430,3 +598,180 @@ test(
     assert.equal(readHeadFile(tempDir, file), '{ "alpha": 1 }\n');
   },
 );
+
+test("refuses a concurrent target auto-save without amending it", async (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const file = prepareBlockingCommit(tempDir);
+  const originalHead = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+  const concurrent = '{"user":true}\n';
+
+  const result = await runCommitFixDuringPrettier(tempDir, () => {
+    writeFile(path.join(tempDir, file), concurrent);
+  });
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 1);
+  assert.match(output, /Repository state changed while automatic fixes/);
+  assert.match(output, /latest commit was not amended/i);
+  assert.equal(
+    run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+    originalHead,
+  );
+  assert.equal(readFile(tempDir, file), concurrent);
+  assert.equal(readHeadFile(tempDir, file), '{"alpha":1}\n');
+});
+
+test("preserves unrelated tracked worktree changes during fixer execution", async (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  prepareBlockingCommit(tempDir);
+  const originalHead = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+  const concurrent = "unrelated user edit\n";
+
+  const result = await runCommitFixDuringPrettier(tempDir, () => {
+    writeFile(path.join(tempDir, "README.md"), concurrent);
+  });
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 1);
+  assert.match(output, /Repository state changed while automatic fixes/);
+  assert.equal(readFile(tempDir, "README.md"), concurrent);
+  assert.equal(
+    run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+    originalHead,
+  );
+});
+
+test("revalidates the worktree immediately before amend", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  writeFile(path.join(tempDir, "src", "late.json"), '{"alpha":1}\n');
+  run("git", ["add", "src/late.json"], tempDir);
+  run("git", ["commit", "-m", "late guard"], tempDir);
+  const originalHead = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+
+  const result = runCommitFix(tempDir, {
+    env: mutateAfterIndexInstallEnv(tempDir, "README.md"),
+  });
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 1);
+  assert.match(output, /Repository state changed while automatic fixes/);
+  assert.equal(readFile(tempDir, "README.md"), "late user edit\n");
+  assert.equal(
+    run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+    originalHead,
+  );
+  assert.equal(
+    run("git", ["show", ":src/late.json"], tempDir).stdout,
+    '{ "alpha": 1 }\n',
+  );
+});
+
+test("refuses concurrent committed-target deletion and type replacement", async (t) => {
+  for (const replacement of ["missing", "directory"]) {
+    const tempDir = createTempRepo();
+    t.after(() => cleanupTempRepo(tempDir));
+    const file = prepareBlockingCommit(
+      tempDir,
+      `src/${replacement}-commit.json`,
+    );
+    const target = path.join(tempDir, file);
+    const originalHead = run(
+      "git",
+      ["rev-parse", "HEAD"],
+      tempDir,
+    ).stdout.trim();
+
+    const result = await runCommitFixDuringPrettier(tempDir, () => {
+      fs.rmSync(target);
+      if (replacement === "directory") {
+        fs.mkdirSync(target);
+      }
+    });
+
+    assert.equal(result.status, 1);
+    assert.equal(
+      run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+      originalHead,
+    );
+    assert.equal(fs.existsSync(target), replacement === "directory");
+    if (replacement === "directory") {
+      assert.equal(fs.lstatSync(target).isDirectory(), true);
+    }
+  }
+});
+
+test("preserves a concurrent index update instead of amending it", async (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  prepareBlockingCommit(tempDir);
+  const originalHead = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+
+  const result = await runCommitFixDuringPrettier(tempDir, () => {
+    writeFile(path.join(tempDir, "concurrent.txt"), "user index work\n");
+    run("git", ["add", "concurrent.txt"], tempDir);
+  });
+
+  assert.equal(result.status, 1);
+  assert.equal(
+    run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+    originalHead,
+  );
+  assert.equal(
+    run("git", ["show", ":concurrent.txt"], tempDir).stdout,
+    "user index work\n",
+  );
+});
+
+test("refuses when HEAD moves before the amend", async (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  prepareBlockingCommit(tempDir);
+  const originalHead = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+
+  const result = await runCommitFixDuringPrettier(tempDir, () => {
+    run("git", ["commit", "--allow-empty", "-m", "concurrent head"], tempDir);
+  });
+  const movedHead = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+
+  assert.equal(result.status, 1);
+  assert.notEqual(movedHead, originalHead);
+  assert.equal(
+    run("git", ["log", "-1", "--format=%s"], tempDir).stdout.trim(),
+    "concurrent head",
+  );
+});
+
+test("refuses a publication during the run with the fun tone", async (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const remoteDir = addBareRemote(tempDir);
+  t.after(() => fs.rmSync(remoteDir, { recursive: true, force: true }));
+  prepareBlockingCommit(tempDir);
+  const originalHead = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+  writeFile(path.join(tempDir, ".commitmentrc.json"), '{"tone":"fun"}\n');
+
+  const result = await runCommitFixDuringPrettier(tempDir, () => {
+    const pushed = run("git", ["push", "origin", "HEAD:main"], tempDir);
+    assert.equal(pushed.status, 0);
+  });
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 1);
+  assert.match(output, /changed the relationship status mid-fix/);
+  assert.match(output, /latest commit was left out of the drama/i);
+  assert.equal(
+    run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+    originalHead,
+  );
+  assert.equal(
+    run(
+      "git",
+      ["rev-parse", "refs/remotes/origin/main"],
+      tempDir,
+    ).stdout.trim(),
+    originalHead,
+  );
+});

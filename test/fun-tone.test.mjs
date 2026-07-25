@@ -4,7 +4,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { buildAdvisoryMessage } from "../scripts/lib/message.mjs";
+import {
+  buildAdvisoryMessage,
+  buildConcurrentFixRefusalMessage,
+} from "../scripts/lib/message.mjs";
 import {
   cleanupTempRepo,
   createTempRepo,
@@ -231,5 +234,31 @@ test("fun tone passes unrecognized messages through unchanged", () => {
   assert.match(
     funText("something completely bespoke happened"),
     /something completely bespoke happened/,
+  );
+});
+
+test("fun tone rewrites concurrent fixer refusals", () => {
+  const staged = buildConcurrentFixRefusalMessage({
+    operation: "stage",
+    tone: "fun",
+    rerunCommand: "npm run fix:staged",
+  });
+  const amended = buildConcurrentFixRefusalMessage({
+    operation: "amend",
+    tone: "fun",
+    rerunCommand: "npm run commit:fix",
+  });
+
+  assert.match(
+    staged.lines.join("\n"),
+    /repository changed the relationship status mid-fix/i,
+  );
+  assert.match(
+    staged.lines.join("\n"),
+    /No surprise changes were invited into the commit/,
+  );
+  assert.match(
+    amended.lines.join("\n"),
+    /latest commit was left out of the drama/i,
   );
 });

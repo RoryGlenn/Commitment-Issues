@@ -25,6 +25,7 @@ import {
   inspectMutableProjectFile,
   mutableProjectFileUnchanged,
   preflightMutableProjectFile,
+  readMutableProjectFile,
   removeMutableProjectFile,
   removeOwnedPath,
   shortFileList,
@@ -58,6 +59,123 @@ function replaceProcessPropertyForTest(t, name, value) {
     }
   });
 }
+
+test("mutable project file reads stay bound to the inspected regular file", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mutable-read-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "package.json");
+  const content = Buffer.from('{"exact":"\u732b"}\n');
+  fs.writeFileSync(file, content);
+  const state = inspectMutableProjectFile(file);
+
+  assert.deepEqual(readMutableProjectFile(state), content);
+
+  fs.writeFileSync(file, '{"changed":true}\n');
+  assert.throws(
+    () => readMutableProjectFile(state),
+    (error) => error.code === "ESTALE",
+  );
+});
+
+test("mutable project file reads reject missing and unsafe states", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mutable-read-unsafe-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const missing = inspectMutableProjectFile(path.join(dir, "missing.json"));
+  const target = path.join(dir, "target.json");
+  const link = path.join(dir, "link.json");
+  fs.writeFileSync(target, "{}\n");
+  fs.symlinkSync(target, link);
+  const unsafe = inspectMutableProjectFile(link);
+
+  for (const state of [missing, unsafe]) {
+    assert.throws(
+      () => readMutableProjectFile(state),
+      (error) => error.code === "ESTALE",
+    );
+  }
+});
+
+test("mutable project file reads reject a non-regular opened descriptor", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mutable-read-opened-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "package.json");
+  fs.writeFileSync(file, "{}\n");
+  const state = inspectMutableProjectFile(file);
+  const originalOpen = fs.openSync;
+  const originalFstat = fs.fstatSync;
+  let descriptor;
+  t.mock.method(fs, "openSync", (filePath, ...args) => {
+    const opened = originalOpen(filePath, ...args);
+    if (path.resolve(String(filePath)) === file) {
+      descriptor = opened;
+    }
+    return opened;
+  });
+  t.mock.method(fs, "fstatSync", (opened, ...args) => {
+    const stats = originalFstat(opened, ...args);
+    return opened === descriptor ? { ...stats, isFile: () => false } : stats;
+  });
+
+  assert.throws(
+    () => readMutableProjectFile(state),
+    (error) => error.code === "ESTALE",
+  );
+});
+
+test("mutable project file reads reject descriptor drift after reading", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mutable-read-drift-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "package.json");
+  fs.writeFileSync(file, "{}\n");
+  const state = inspectMutableProjectFile(file);
+  const originalOpen = fs.openSync;
+  const originalFstat = fs.fstatSync;
+  let descriptor;
+  let fstats = 0;
+  t.mock.method(fs, "openSync", (filePath, ...args) => {
+    const opened = originalOpen(filePath, ...args);
+    if (path.resolve(String(filePath)) === file) {
+      descriptor = opened;
+    }
+    return opened;
+  });
+  t.mock.method(fs, "fstatSync", (opened, ...args) => {
+    const stats = originalFstat(opened, ...args);
+    if (opened !== descriptor) {
+      return stats;
+    }
+    fstats += 1;
+    return fstats === 2 ? { ...stats, ino: stats.ino + 1n } : stats;
+  });
+
+  assert.throws(
+    () => readMutableProjectFile(state),
+    (error) => error.code === "ESTALE",
+  );
+});
+
+test("mutable project file reads reject pathname drift after reading", (t) => {
+  const dir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "mutable-read-path-drift-"),
+  );
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "package.json");
+  fs.writeFileSync(file, "{}\n");
+  const state = inspectMutableProjectFile(file);
+  const originalRead = fs.readFileSync;
+  t.mock.method(fs, "readFileSync", (filePath, ...args) => {
+    const content = originalRead(filePath, ...args);
+    if (typeof filePath === "number") {
+      fs.writeFileSync(file, '{"changed":true}\n');
+    }
+    return content;
+  });
+
+  assert.throws(
+    () => readMutableProjectFile(state),
+    (error) => error.code === "ESTALE",
+  );
+});
 
 function exitedChildPid() {
   const result = spawnSync(process.execPath, ["-e", ""]);

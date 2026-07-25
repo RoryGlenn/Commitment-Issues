@@ -111,10 +111,31 @@ discard files or force ref/history changes are outside this interface.
 `init` wires these common scripts in the consuming `package.json`:
 
 - `doctor` verifies and repairs hook wiring.
-- `fix:staged` runs staged-file fixes.
+- `fix:staged` runs staged-file fixes against an exact repository snapshot.
 - `commit:fix` applies safe automatic fixes and amends the latest clean,
-  unpushed commit.
+  unpushed commit only while that snapshot remains current.
 - `test:precommit` runs pre-commit checks directly.
+
+Both fix commands capture the initial `HEAD`, exact index-file identity and
+bytes, complete index tree, target entry mode and blob, and regular-file
+identity. ESLint and Prettier receive captured content through stdin with the
+original path used only for configuration and parser selection; they never
+receive a live target to rewrite. Complete attributable outputs are then
+written with the crash-resistant project-file transaction and rechecked
+byte-for-byte.
+
+Immediately before staging, the commands verify the same `HEAD`, index, and
+expected worktree bytes. Fixed content is hashed explicitly and a prepared
+index containing only those blobs is installed while holding Git's cooperative
+`index.lock`; `git add` never reads a concurrent worktree edit. `commit:fix`
+additionally verifies that no tracked worktree change appeared and that the
+original commit is still absent from remote-tracking branches both before
+staging and immediately before `git commit --amend`.
+
+A detected edit, deletion, path-type replacement, index update, `HEAD` move,
+publication, lock conflict, or failed revalidation stops the command. It does
+not stage ambiguous bytes or amend a different commit. Concurrent user state
+remains available for review with `git status`.
 
 ## Setup removed by `uninstall`
 

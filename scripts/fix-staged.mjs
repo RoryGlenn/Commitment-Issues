@@ -4,34 +4,27 @@
 import fs from "node:fs";
 import pc from "picocolors";
 import { errorBox, infoBox, successBox, warningBox } from "./lib/ui.mjs";
-import { run, runTool } from "./lib/process.mjs";
+import { run } from "./lib/process.mjs";
 import {
   codeFilePattern,
   formatFilePattern,
   parseNulPaths,
   shortFileList,
 } from "./lib/files.mjs";
+import {
+  applyFixOutputs,
+  captureFixSnapshot,
+  isFixStateChangedError,
+  runFixTools,
+  stageFixOutputs,
+} from "./lib/fix-safety.mjs";
+import { loadPrecommitConfig } from "./lib/config.mjs";
+import { buildConcurrentFixRefusalMessage } from "./lib/message.mjs";
 import { devInstallCommand, runScript } from "./lib/package-manager.mjs";
 import { escapeTerminalText } from "./lib/terminal.mjs";
 
 const GIT_PATH_ARGS = ["-c", "core.quotePath=false"];
-
-function getIndexSnapshot(files) {
-  const snapshotResult = run("git", [
-    ...GIT_PATH_ARGS,
-    "ls-files",
-    "--stage",
-    "-z",
-    "--",
-    ...files,
-  ]);
-
-  if (snapshotResult.error || snapshotResult.status !== 0) {
-    return null;
-  }
-
-  return snapshotResult.stdout;
-}
+const tone = loadPrecommitConfig().tone;
 
 const stagedResult = run("git", [
   ...GIT_PATH_ARGS,
@@ -131,80 +124,52 @@ if (missingWorkingTreeFiles.length > 0) {
   process.exit(1);
 }
 
-const indexSnapshotBefore = getIndexSnapshot(fixableFiles);
-
-// Run the fixers directly. The guards above guarantee the working tree and
-// index agree for every target file, so fixing the working tree and re-adding
-// is exact — no stash/revert machinery needed. Tool failures don't stop the
-// pipeline (fix what can be fixed, report the rest), mirroring each tool's
-// own --fix semantics.
-let toolFailed = false;
-const missingTools = [];
-
-function recordToolResult(result) {
-  if (result.outcome !== "success") {
-    toolFailed = true;
+let fixResult;
+let stagingResult;
+try {
+  const snapshot = captureFixSnapshot(fixableFiles, {
+    allowUnbornHead: true,
+  });
+  fixResult = await runFixTools(snapshot.targets, {
+    eslintFiles: stagedJsFiles,
+    prettierFiles: fixableFiles,
+  });
+  for (const diagnostic of fixResult.diagnostics) {
+    process.stderr.write(diagnostic.replace(/\n?$/u, "\n"));
   }
-  if (result.outcome === "missing-tool") {
-    missingTools.push(result.missingTool);
+  const appliedSnapshot = applyFixOutputs(snapshot, fixResult.outputs);
+  stagingResult = stageFixOutputs(appliedSnapshot);
+} catch (error) {
+  if (isFixStateChangedError(error)) {
+    const message = buildConcurrentFixRefusalMessage({
+      operation: "stage",
+      tone,
+      rerunCommand: runScript("fix:staged"),
+    });
+    errorBox(message.lines);
+    process.exit(1);
   }
-}
-
-if (stagedJsFiles.length > 0) {
-  const eslintResult = await runTool(
-    "eslint",
-    ["--cache", "--cache-strategy", "content", "--fix", "--", ...stagedJsFiles],
-    { stdio: "inherit" },
-  );
-  recordToolResult(eslintResult);
-}
-
-const prettierResult = await runTool(
-  "prettier",
-  [
-    "--cache",
-    "--cache-location",
-    ".prettiercache",
-    "--cache-strategy",
-    "content",
-    "--write",
-    "--ignore-unknown",
-    "--",
-    ...fixableFiles,
-  ],
-  { stdio: "inherit" },
-);
-recordToolResult(prettierResult);
-
-// Stage whatever the fixers changed so the commit picks it up.
-const addResult = run("git", [...GIT_PATH_ARGS, "add", "--", ...fixableFiles]);
-if (addResult.error || addResult.status !== 0) {
   errorBox([
-    pc.bold("Unable to restage fixed files."),
+    pc.bold("Unable to apply automatic fixes safely."),
     "",
-    pc.dim("Automatic fixes were applied to the working tree, but"),
-    pc.dim("`git add` failed. Review `git status` and stage manually."),
+    pc.dim("Exact staging could not be verified."),
+    pc.dim(escapeTerminalText(error.message)),
+    pc.dim("Review git status and the tool output, then try again."),
   ]);
   process.exit(1);
 }
 
 console.log("");
 
-if (!toolFailed) {
-  const indexSnapshotAfter = getIndexSnapshot(fixableFiles);
-  const indexChanged =
-    indexSnapshotBefore !== null && indexSnapshotAfter !== null
-      ? indexSnapshotBefore !== indexSnapshotAfter
-      : null;
+if (!fixResult.toolFailed) {
+  const indexChanged = stagingResult.changedFiles.length > 0;
 
-  const summaryTitle =
-    indexChanged === true
-      ? "Staged fixes applied."
-      : "Staged files already clean.";
-  const summaryDetail =
-    indexChanged === true
-      ? `Refreshed the index for ${fixableFiles.length} staged file${fixableFiles.length === 1 ? "" : "s"}.`
-      : `Checked ${fixableFiles.length} staged file${fixableFiles.length === 1 ? "" : "s"}. No automatic changes were needed.`;
+  const summaryTitle = indexChanged
+    ? "Staged fixes applied."
+    : "Staged files already clean.";
+  const summaryDetail = indexChanged
+    ? `Refreshed the index for ${fixableFiles.length} staged file${fixableFiles.length === 1 ? "" : "s"}.`
+    : `Checked ${fixableFiles.length} staged file${fixableFiles.length === 1 ? "" : "s"}. No automatic changes were needed.`;
 
   successBox([
     pc.bold(summaryTitle),
@@ -218,11 +183,11 @@ if (!toolFailed) {
 warningBox([
   pc.bold("Manual attention still needed."),
   "",
-  pc.dim("Available fixes were applied and the index was refreshed."),
-  ...(missingTools.length > 0
+  pc.dim("Available attributable fixes were applied and staged."),
+  ...(fixResult.missingTools.length > 0
     ? [
-        pc.dim(`Missing local tool(s): ${missingTools.join(", ")}.`),
-        pc.dim(`Install them: ${devInstallCommand(missingTools)}`),
+        pc.dim(`Missing local tool(s): ${fixResult.missingTools.join(", ")}.`),
+        pc.dim(`Install them: ${devInstallCommand(fixResult.missingTools)}`),
       ]
     : []),
   pc.dim(

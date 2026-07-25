@@ -66,6 +66,14 @@ Push pure logic **down into `scripts/lib/`** so it can be unit-tested directly; 
 
 - `codeFilePattern`, `formatFilePattern`, `findTestFile`, `isTestExemptFile`, `collectTestsForFiles`, `shortFileList`. Use `isTestExemptFile` to honor `precommitChecks.testExempt` globs (e.g. `scripts/lib/**`).
 
+### `fix-safety.mjs`
+
+- `captureFixSnapshot`, `runFixTools`, `applyFixOutputs`, and
+  `stageFixOutputs` bind explicit fixer commands to exact `HEAD`, index
+  identity/bytes/tree, and target bytes. Use this transaction for live
+  worktree or index mutation; do not pass live target paths to writable
+  formatter modes or replace exact blob staging with `git add`.
+
 ### `package-manager.mjs`
 
 - `runScript(...)`, `devInstallCommand(pkgs, cwd)` — per-manager strings (npm/pnpm/yarn/bun) so output and smokes stay manager-agnostic.

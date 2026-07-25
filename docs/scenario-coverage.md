@@ -34,7 +34,7 @@ production-readiness workstream #130 is consolidated in the
 - **TEST-003** — deleted tests are not executed, while a deleted source, a
   source-only rename, and a combined source+test rename cannot evade blocking
   related-test selection. Real-Git fixture: `test/prepush.test.mjs`.
-- **TEST-004** — all 64 generated message-state assets are gallery-owned and
+- **TEST-004** — all 66 generated message-state assets are gallery-owned and
   exactly reproducible in a private temporary directory. Unit/subprocess:
   `test/visual-assets.test.mjs`.
 - **TEST-005** — the aggregate branch-protection gate succeeds only when DCO,
@@ -434,10 +434,17 @@ production-readiness workstream #130 is consolidated in the
 - **CFIX-009** — warns when a format-only file cannot be fixed automatically. Fixture: `test/commit-fix.test.mjs`.
 - **CFIX-010** — Git failures error clearly: no commit, worktree/file-list/staging/staged-fix inspection, and amend failure. Fixture: `test/commit-fix.test.mjs`.
 - **CFIX-011** — committed pathnames with leading/trailing whitespace, tabs, newlines, and Unicode are fixed and amended exactly. Fixture: `test/commit-fix.test.mjs`.
+- **CFIX-012** — deterministic concurrent auto-save, deletion, directory
+  replacement, index update, and `HEAD` movement are refused without amending
+  or absorbing the concurrent state. Fixture: `test/commit-fix.test.mjs`.
+- **CFIX-013** — publication while tools run is detected before mutation;
+  standard and fun refusals preserve the original commit. Fixture:
+  `test/commit-fix.test.mjs`; unit: `test/message.test.mjs`,
+  `test/fun-tone.test.mjs`.
 
 ### Staged fixes
 
-- **STG-001** — `fix:staged` applies auto-fixes and refreshes the index; reports already clean when nothing changes (pluralized, tolerant of an unreadable index snapshot). Fixture: `test/fix-staged.test.mjs`.
+- **STG-001** — `fix:staged` applies auto-fixes and refreshes the index; reports already clean when nothing changes and fails closed when the exact index snapshot is unreadable. Fixture: `test/fix-staged.test.mjs`.
 - **STG-002** — `fix:staged` warns when fixes apply but non-fixable lint issues remain. Fixture: `test/fix-staged.test.mjs`.
 - **STG-003** — `fix:staged` shows an info box when there are no staged fixable files. Fixture: `test/fix-staged.test.mjs`.
 - **STG-004** — `fix:staged` refuses partially staged files and files missing from the working tree. Fixture: `test/fix-staged.test.mjs`.
@@ -446,6 +453,14 @@ production-readiness workstream #130 is consolidated in the
 - **STG-007** — `fix-staged-js` exits 1 on remaining non-fixable lint or a Prettier parse error. Fixture: `test/fix-staged-js.test.mjs`.
 - **STG-008** — `fix-staged-js` exits 0 immediately when given no file arguments. Fixture: `test/fix-staged-js.test.mjs`.
 - **STG-009** — staged pathnames with leading/trailing whitespace, tabs, newlines, and Unicode are fixed and restaged exactly. Fixture: `test/fix-staged.test.mjs`.
+- **STG-010** — deterministic concurrent auto-save, deletion, directory
+  replacement, index update, and `HEAD` movement are refused without staging
+  the conflicting state. Fixture: `test/fix-staged.test.mjs`.
+- **STG-011** — only captured stdin-derived tool output is installed under
+  Git's index lock; standard and fun concurrency refusals direct the user back
+  to `git status`. Unit/fixture: `test/fix-safety.test.mjs`,
+  `test/fix-staged.test.mjs`, `test/message.test.mjs`,
+  `test/fun-tone.test.mjs`.
 
 ### Doctor and hook health
 

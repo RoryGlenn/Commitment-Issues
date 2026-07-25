@@ -85,39 +85,40 @@ an owner disappears, or no named owner references its source. The finer-grained
 claim-to-scenario map remains in
 [Scenario Coverage](https://github.com/RoryGlenn/commitment-issues/blob/main/docs/scenario-coverage.md).
 
-| Runtime source                    | Meaningful behavior owned                                                              | Primary automated evidence                                                             |
-| --------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `scripts/cli.mjs`                 | command dispatch, argument contracts, help/version, exit status                        | `test/cli.test.mjs`                                                                    |
-| `scripts/commit-fix.mjs`          | safe fix-and-amend flow, pushed/dirty/empty refusal, child cleanup                     | `test/commit-fix.test.mjs`                                                             |
-| `scripts/commit-msg.mjs`          | optional local commitlint execution, advisory/blocking policy                          | `test/commit-msg.test.mjs`                                                             |
-| `scripts/doctor.mjs`              | hook inspection, bounded repair, quiet install behavior                                | `test/doctor.test.mjs`                                                                 |
-| `scripts/fix-staged-js.mjs`       | explicit-file formatter/linter execution and error propagation                         | `test/fix-staged-js.test.mjs`                                                          |
-| `scripts/fix-staged.mjs`          | safe staged-file repair without overwriting partial work                               | `test/fix-staged.test.mjs`                                                             |
-| `scripts/init.mjs`                | idempotent setup, validation, preflight, and hook ownership                            | `test/init.test.mjs`                                                                   |
-| `scripts/panic.mjs`               | optional-lock-free repository inspection and one-box recovery guidance                 | `test/panic.test.mjs`                                                                  |
-| `scripts/precommit.mjs`           | staged checks, findings, secret/test policy, JSON and protected-branch outcomes        | `test/precommit.test.mjs`                                                              |
-| `scripts/prepush.mjs`             | pushed-range test selection, deleted/renamed paths, blocking/advisory outcomes         | `test/prepush.test.mjs`                                                                |
-| `scripts/uninstall.mjs`           | exact owned cleanup, dry run, preservation of custom state                             | `test/uninstall.test.mjs`                                                              |
-| `scripts/vows.mjs`                | hidden read-only command entrypoint                                                    | `test/cli.test.mjs`, `test/vows.test.mjs`                                              |
-| `scripts/lib/checks.mjs`          | lint, formatting, test, timeout, and finding classification                            | `test/checks.test.mjs`                                                                 |
-| `scripts/lib/commit-guards.mjs`   | branch and worktree guards across Git states                                           | `test/commit-guards.test.mjs`                                                          |
-| `scripts/lib/config.mjs`          | package/standalone precedence, validation, defaults, and diagnostics                   | `test/config.test.mjs`                                                                 |
-| `scripts/lib/debug-artifacts.mjs` | opt-in staged debug rules, false-positive policy, exemptions, and aggregate findings   | `test/debug-artifacts.test.mjs`, `test/debug-artifacts-integration.test.mjs`           |
-| `scripts/lib/files.mjs`           | NUL-safe Git paths, ownership, stable project-file writes, workspace roots, and paths  | `test/lib-files.test.mjs`, `test/path-normalization.test.mjs`, `test/property.test.js` |
-| `scripts/lib/hooks.mjs`           | native/manager hook classification, resolution, snippets, ownership, and safe writes   | `test/hooks.test.mjs`                                                                  |
-| `scripts/lib/json-output.mjs`     | stable machine-readable schema and status mapping                                      | `test/json-output.test.mjs`                                                            |
-| `scripts/lib/local-tool.mjs`      | project-local executable discovery without global/network fallback                     | `test/local-tool.test.mjs`                                                             |
-| `scripts/lib/logo.mjs`            | exact branded header and fresh return values                                           | `test/logo.test.mjs`                                                                   |
-| `scripts/lib/message.mjs`         | severity, tone, wrapping, and single-summary composition                               | `test/message.test.mjs`                                                                |
-| `scripts/lib/package-manager.mjs` | package-manager detection and command construction                                     | `test/package-manager.test.mjs`                                                        |
-| `scripts/lib/panic.mjs`           | read-only Git-state parsing, safe guide selection, and one-presentation modeling       | `test/panic.test.mjs`                                                                  |
-| `scripts/lib/process.mjs`         | shell-free child execution, environment isolation, timeout and process-tree cleanup    | `test/process.test.mjs`                                                                |
-| `scripts/lib/push-base.mjs`       | upstream, first-push, remote, and range-base inference                                 | `test/push-base.test.mjs`                                                              |
-| `scripts/lib/runtime.mjs`         | package-engine minimum parsing and unsupported-Node diagnostics                        | `test/runtime.test.mjs`; normal CLI subprocess coverage                                |
-| `scripts/lib/secret-scan.mjs`     | staged-added-line parsing, credential patterns, exemptions, and fail-closed scan state | `test/secret-scan.test.mjs`, `test/secret-scan-integration.test.mjs`                   |
-| `scripts/lib/ui.mjs`              | terminal capability detection, output routing, colors, and width                       | `test/ui.test.mjs`                                                                     |
-| `scripts/lib/vows.mjs`            | deterministic vow content, ANSI behavior, wrapping, and immutability                   | `test/vows.test.mjs`                                                                   |
-| `scripts/lib/welcome.mjs`         | once-per-clone marker ownership, fail-open behavior, and Commit Owl onboarding         | `test/welcome.test.mjs`                                                                |
+| Runtime source                    | Meaningful behavior owned                                                               | Primary automated evidence                                                             |
+| --------------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `scripts/cli.mjs`                 | command dispatch, argument contracts, help/version, exit status                         | `test/cli.test.mjs`                                                                    |
+| `scripts/commit-fix.mjs`          | snapshot-bound fix-and-amend flow, pushed/dirty/concurrent/empty refusal, child cleanup | `test/commit-fix.test.mjs`                                                             |
+| `scripts/lib/fix-safety.mjs`      | exact fixer inputs, repository snapshots, index-lock staging, concurrency refusal       | `test/fix-safety.test.mjs`, `test/fix-staged.test.mjs`, `test/commit-fix.test.mjs`     |
+| `scripts/commit-msg.mjs`          | optional local commitlint execution, advisory/blocking policy                           | `test/commit-msg.test.mjs`                                                             |
+| `scripts/doctor.mjs`              | hook inspection, bounded repair, quiet install behavior                                 | `test/doctor.test.mjs`                                                                 |
+| `scripts/fix-staged-js.mjs`       | explicit-file formatter/linter execution and error propagation                          | `test/fix-staged-js.test.mjs`                                                          |
+| `scripts/fix-staged.mjs`          | safe staged-file repair without overwriting partial work                                | `test/fix-staged.test.mjs`                                                             |
+| `scripts/init.mjs`                | idempotent setup, validation, preflight, and hook ownership                             | `test/init.test.mjs`                                                                   |
+| `scripts/panic.mjs`               | optional-lock-free repository inspection and one-box recovery guidance                  | `test/panic.test.mjs`                                                                  |
+| `scripts/precommit.mjs`           | staged checks, findings, secret/test policy, JSON and protected-branch outcomes         | `test/precommit.test.mjs`                                                              |
+| `scripts/prepush.mjs`             | pushed-range test selection, deleted/renamed paths, blocking/advisory outcomes          | `test/prepush.test.mjs`                                                                |
+| `scripts/uninstall.mjs`           | exact owned cleanup, dry run, preservation of custom state                              | `test/uninstall.test.mjs`                                                              |
+| `scripts/vows.mjs`                | hidden read-only command entrypoint                                                     | `test/cli.test.mjs`, `test/vows.test.mjs`                                              |
+| `scripts/lib/checks.mjs`          | lint, formatting, test, timeout, and finding classification                             | `test/checks.test.mjs`                                                                 |
+| `scripts/lib/commit-guards.mjs`   | branch and worktree guards across Git states                                            | `test/commit-guards.test.mjs`                                                          |
+| `scripts/lib/config.mjs`          | package/standalone precedence, validation, defaults, and diagnostics                    | `test/config.test.mjs`                                                                 |
+| `scripts/lib/debug-artifacts.mjs` | opt-in staged debug rules, false-positive policy, exemptions, and aggregate findings    | `test/debug-artifacts.test.mjs`, `test/debug-artifacts-integration.test.mjs`           |
+| `scripts/lib/files.mjs`           | NUL-safe Git paths, ownership, stable project-file writes, workspace roots, and paths   | `test/lib-files.test.mjs`, `test/path-normalization.test.mjs`, `test/property.test.js` |
+| `scripts/lib/hooks.mjs`           | native/manager hook classification, resolution, snippets, ownership, and safe writes    | `test/hooks.test.mjs`                                                                  |
+| `scripts/lib/json-output.mjs`     | stable machine-readable schema and status mapping                                       | `test/json-output.test.mjs`                                                            |
+| `scripts/lib/local-tool.mjs`      | project-local executable discovery without global/network fallback                      | `test/local-tool.test.mjs`                                                             |
+| `scripts/lib/logo.mjs`            | exact branded header and fresh return values                                            | `test/logo.test.mjs`                                                                   |
+| `scripts/lib/message.mjs`         | severity, tone, wrapping, and single-summary composition                                | `test/message.test.mjs`                                                                |
+| `scripts/lib/package-manager.mjs` | package-manager detection and command construction                                      | `test/package-manager.test.mjs`                                                        |
+| `scripts/lib/panic.mjs`           | read-only Git-state parsing, safe guide selection, and one-presentation modeling        | `test/panic.test.mjs`                                                                  |
+| `scripts/lib/process.mjs`         | shell-free child execution, environment isolation, timeout and process-tree cleanup     | `test/process.test.mjs`                                                                |
+| `scripts/lib/push-base.mjs`       | upstream, first-push, remote, and range-base inference                                  | `test/push-base.test.mjs`                                                              |
+| `scripts/lib/runtime.mjs`         | package-engine minimum parsing and unsupported-Node diagnostics                         | `test/runtime.test.mjs`; normal CLI subprocess coverage                                |
+| `scripts/lib/secret-scan.mjs`     | staged-added-line parsing, credential patterns, exemptions, and fail-closed scan state  | `test/secret-scan.test.mjs`, `test/secret-scan-integration.test.mjs`                   |
+| `scripts/lib/ui.mjs`              | terminal capability detection, output routing, colors, and width                        | `test/ui.test.mjs`                                                                     |
+| `scripts/lib/vows.mjs`            | deterministic vow content, ANSI behavior, wrapping, and immutability                    | `test/vows.test.mjs`                                                                   |
+| `scripts/lib/welcome.mjs`         | once-per-clone marker ownership, fail-open behavior, and Commit Owl onboarding          | `test/welcome.test.mjs`                                                                |
 
 ## Maintenance and integration ownership
 
@@ -149,7 +150,7 @@ The test strategy also enforces behavior that a percentage cannot:
   renamed but its old test remains, and when source and test are renamed
   together and the renamed test fails;
 - generated message-state SVGs are regenerated in a private temporary
-  directory and compared byte-for-byte with all 64 committed assets;
+  directory and compared byte-for-byte with all 66 committed assets;
 - `test/ci-change-classifier.test.mjs` exercises every path category, both
   fields of rename/copy records, unusual NUL-delimited filenames, a 20,000-file
   diff, divergent fork-shaped history, shallow/missing history, malformed

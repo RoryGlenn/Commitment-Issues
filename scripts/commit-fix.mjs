@@ -3,8 +3,8 @@
 
 import pc from "picocolors";
 import { errorBox, infoBox, successBox, warningBox } from "./lib/ui.mjs";
-import { run, runTool, spawnAsync } from "./lib/process.mjs";
-import { devInstallCommand } from "./lib/package-manager.mjs";
+import { run, spawnAsync } from "./lib/process.mjs";
+import { devInstallCommand, runScript } from "./lib/package-manager.mjs";
 import { escapeTerminalText } from "./lib/terminal.mjs";
 import {
   codeFilePattern,
@@ -12,8 +12,19 @@ import {
   parseNulPaths,
   shortFileList,
 } from "./lib/files.mjs";
+import {
+  applyFixOutputs,
+  assertFixSnapshotUnchanged,
+  captureFixSnapshot,
+  isFixStateChangedError,
+  runFixTools,
+  stageFixOutputs,
+} from "./lib/fix-safety.mjs";
+import { loadPrecommitConfig } from "./lib/config.mjs";
+import { buildConcurrentFixRefusalMessage } from "./lib/message.mjs";
 
 const GIT_PATH_ARGS = ["-c", "core.quotePath=false"];
+const tone = loadPrecommitConfig().tone;
 
 const headResult = run("git", ["rev-parse", "--verify", "HEAD"]);
 
@@ -28,7 +39,13 @@ if (headResult.error || headResult.status !== 0) {
   process.exit(1);
 }
 
-const remoteContainsResult = run("git", ["branch", "-r", "--contains", "HEAD"]);
+const initialHead = headResult.stdout.trim();
+const remoteContainsResult = run("git", [
+  "branch",
+  "-r",
+  "--contains",
+  initialHead,
+]);
 
 // Fail closed: if Git cannot answer, the commit cannot be proven unpushed, and
 // amending pushed history is the one thing this command must never do.
@@ -52,6 +69,69 @@ if (headIsPushed) {
       "Amending it would rewrite published history. Make a new commit with fixes instead.",
     ),
   ]);
+  process.exit(1);
+}
+
+function fixerStateError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function assertHeadUnpublished(head) {
+  const result = run("git", ["branch", "-r", "--contains", head]);
+  if (result.error || result.status !== 0) {
+    throw fixerStateError(
+      "ERR_FIX_STATE_INSPECTION",
+      "Unable to revalidate publication state.",
+    );
+  }
+  if (result.stdout.trim().length > 0) {
+    throw fixerStateError(
+      "ERR_FIX_STATE_CHANGED",
+      "The original commit was published while fixes were running.",
+    );
+  }
+}
+
+function assertOnlyExpectedUnstagedChanges(expectedFiles) {
+  const result = run("git", [...GIT_PATH_ARGS, "diff", "--name-only", "-z"]);
+  const files = parseNulPaths(result.stdout);
+  if (result.error || result.status !== 0 || files === null) {
+    throw fixerStateError(
+      "ERR_FIX_STATE_INSPECTION",
+      "Unable to revalidate the working tree.",
+    );
+  }
+  const expected = new Set(expectedFiles);
+  if (
+    files.length !== expected.size ||
+    files.some((file) => !expected.has(file))
+  ) {
+    throw fixerStateError(
+      "ERR_FIX_STATE_CHANGED",
+      "Tracked worktree changes appeared while fixes were running.",
+    );
+  }
+}
+
+function refuseUnsafeFix(error, operation) {
+  if (isFixStateChangedError(error)) {
+    const message = buildConcurrentFixRefusalMessage({
+      operation,
+      tone,
+      rerunCommand: runScript("commit:fix"),
+    });
+    errorBox(message.lines);
+  } else {
+    errorBox([
+      pc.bold("Unable to apply automatic fixes safely."),
+      "",
+      pc.dim("The repository could not be revalidated, so the commit"),
+      pc.dim("was not amended. Review git status, then try again."),
+      pc.dim(escapeTerminalText(error.message)),
+    ]);
+  }
   process.exit(1);
 }
 
@@ -138,9 +218,6 @@ const committedJsFiles = committedFiles.filter((file) =>
 const committedFormatFiles = committedFiles.filter((file) =>
   formatFilePattern.test(file),
 );
-const formatOnlyFiles = committedFormatFiles.filter(
-  (file) => !codeFilePattern.test(file),
-);
 const fixableFiles = Array.from(
   new Set([...committedJsFiles, ...committedFormatFiles]),
 );
@@ -154,122 +231,52 @@ if (fixableFiles.length === 0) {
   process.exit(0);
 }
 
-let hasRemainingIssues = false;
-const missingTools = new Set();
-
-function recordToolResult(result) {
-  if (result.outcome !== "success") {
-    hasRemainingIssues = true;
+let fixResult;
+let stagedSnapshot;
+let changedFiles;
+try {
+  const snapshot = captureFixSnapshot(fixableFiles);
+  if (snapshot.head !== initialHead) {
+    throw fixerStateError(
+      "ERR_FIX_STATE_CHANGED",
+      "HEAD changed before fixer inputs were captured.",
+    );
   }
-  if (result.outcome === "missing-tool") {
-    missingTools.add(result.missingTool);
+  fixResult = await runFixTools(snapshot.targets, {
+    eslintFiles: committedJsFiles,
+    prettierFiles: fixableFiles,
+  });
+  for (const diagnostic of fixResult.diagnostics) {
+    process.stderr.write(diagnostic.replace(/\n?$/u, "\n"));
   }
+
+  // Bind the mutation to the same clean repository inspected before the tools
+  // ran, including non-target tracked files and publication state.
+  assertFixSnapshotUnchanged(snapshot);
+  assertOnlyExpectedUnstagedChanges([]);
+  assertHeadUnpublished(initialHead);
+
+  const appliedSnapshot = applyFixOutputs(snapshot, fixResult.outputs);
+  const expectedChanges = appliedSnapshot.targets
+    .filter((target) => !target.expectedContent.equals(target.initialContent))
+    .map((target) => target.file);
+  assertOnlyExpectedUnstagedChanges(expectedChanges);
+  const staged = stageFixOutputs(appliedSnapshot);
+  stagedSnapshot = staged.snapshot;
+  changedFiles = staged.changedFiles;
+} catch (error) {
+  refuseUnsafeFix(error, "amend");
 }
 
-if (committedJsFiles.length > 0) {
-  // Run each tool directly from this process. Wrapping fix-staged-js in its own
-  // timed process group would create a nested group when that script launched
-  // the tools, allowing the inner group to escape an outer timeout on POSIX.
-  const eslintResult = await runTool(
-    "eslint",
-    [
-      "--cache",
-      "--cache-strategy",
-      "content",
-      "--fix",
-      "--",
-      ...committedJsFiles,
-    ],
-    {
-      stdio: "inherit",
-    },
-  );
-  recordToolResult(eslintResult);
+const hasRemainingIssues = fixResult.toolFailed;
 
-  const prettierResult = await runTool(
-    "prettier",
-    [
-      "--cache",
-      "--cache-location",
-      ".prettiercache",
-      "--cache-strategy",
-      "content",
-      "--write",
-      "--ignore-unknown",
-      "--",
-      ...committedJsFiles,
-    ],
-    { stdio: "inherit" },
-  );
-  recordToolResult(prettierResult);
-}
-
-if (formatOnlyFiles.length > 0) {
-  const prettierResult = await runTool(
-    "prettier",
-    [
-      "--cache",
-      "--cache-location",
-      ".prettiercache",
-      "--cache-strategy",
-      "content",
-      "--write",
-      "--ignore-unknown",
-      "--",
-      ...formatOnlyFiles,
-    ],
-    {
-      stdio: "inherit",
-    },
-  );
-
-  recordToolResult(prettierResult);
-}
-
-if (missingTools.size > 0) {
-  const missingToolList = [...missingTools];
+if (fixResult.missingTools.length > 0) {
   console.error(
     escapeTerminalText(
-      `commitment-issues: missing local tool(s): ${missingToolList.join(", ")} — ` +
-        `install with \`${devInstallCommand(missingToolList)}\`.`,
+      `commitment-issues: missing local tool(s): ${fixResult.missingTools.join(", ")} — ` +
+        `install with \`${devInstallCommand(fixResult.missingTools)}\`.`,
     ),
   );
-}
-
-const addResult = run("git", ["add", "--", ...fixableFiles]);
-
-if (addResult.error || addResult.status !== 0) {
-  errorBox([
-    pc.bold("Available fixes ran, but files could not be staged."),
-    "",
-    pc.dim("Stage the changes manually and amend the latest commit."),
-  ]);
-  process.exit(1);
-}
-
-const stagedFixResult = run("git", [
-  ...GIT_PATH_ARGS,
-  "diff",
-  "--cached",
-  "--name-only",
-  "-z",
-  "--",
-  ...fixableFiles,
-]);
-
-const changedFiles = parseNulPaths(stagedFixResult.stdout);
-
-if (
-  stagedFixResult.error ||
-  stagedFixResult.status !== 0 ||
-  changedFiles === null
-) {
-  errorBox([
-    pc.bold("Unable to inspect staged fixes for the latest commit."),
-    "",
-    pc.dim("Check the Git index and try again."),
-  ]);
-  process.exit(1);
 }
 
 console.log("");
@@ -322,6 +329,14 @@ if (!parentRef.error && parentRef.status === 0) {
     ]);
     process.exit(0);
   }
+}
+
+try {
+  assertFixSnapshotUnchanged(stagedSnapshot);
+  assertOnlyExpectedUnstagedChanges([]);
+  assertHeadUnpublished(initialHead);
+} catch (error) {
+  refuseUnsafeFix(error, "amend");
 }
 
 const amendResult = await spawnAsync(

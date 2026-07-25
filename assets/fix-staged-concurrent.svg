@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="778" height="230" viewBox="0 0 778 230" role="img" aria-labelledby="title desc">
+  <title id="title">Fix staged concurrent-state refusal terminal output</title>
+  <desc id="desc">A terminal-style error box refusing to stage after repository state changes during automatic fixes.</desc>
+  <rect width="778" height="230" rx="8" ry="8" fill="#181818"/>
+  <g transform="translate(20 24)">
+    <rect x="0" y="0" width="738" height="186" rx="5" ry="5" fill="none" stroke="#ff5f7a" stroke-width="1.3"/>
+    <rect x="332" y="-10" width="74" height="20" fill="#181818"/>
+    <text x="369" y="5" fill="#ff5f7a" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="18" font-weight="700">error</text>
+    <text x="34" y="44" fill="#ff5f7a" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="18" font-weight="700">Repository state changed while automatic fixes were running.</text>
+    <text x="34" y="88" fill="#858b91" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="17">Concurrent work was not staged.</text>
+    <text x="34" y="118" fill="#858b91" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="17">Concurrent work was preserved. Review git status, then try again:</text>
+    <text x="34" y="162" fill="#e8edf2" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="18" font-weight="700">npm run fix:staged</text>
+  </g>
+</svg>

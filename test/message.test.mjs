@@ -8,6 +8,7 @@ import {
   appendPushWarnings,
   buildAdvisoryMessage,
   buildCommitMessageCheckMessage,
+  buildConcurrentFixRefusalMessage,
   buildPushAllowedMessage,
   plural,
   prepushTestInterruption,
@@ -23,6 +24,23 @@ test("success when there are no issues", () => {
   const { severity, lines } = buildAdvisoryMessage([]);
   assert.equal(severity, "success");
   assert.ok(lines.join("\n").includes("All pre-commit checks passed"));
+});
+
+test("concurrent fixer refusals distinguish staging from amending", () => {
+  const staged = buildConcurrentFixRefusalMessage({
+    operation: "stage",
+    rerunCommand: "npm run fix:staged",
+  });
+  const amended = buildConcurrentFixRefusalMessage({
+    operation: "amend",
+    rerunCommand: "npm run commit:fix",
+  });
+
+  assert.equal(staged.severity, "error");
+  assert.match(staged.lines.join("\n"), /Concurrent work was not staged/);
+  assert.match(staged.lines.join("\n"), /npm run fix:staged/);
+  assert.match(amended.lines.join("\n"), /latest commit was not amended/i);
+  assert.match(amended.lines.join("\n"), /npm run commit:fix/);
 });
 
 test("advisory input normalization accepts omitted and legacy context shapes", () => {

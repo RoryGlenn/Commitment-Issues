@@ -157,7 +157,7 @@ test("message-state SVG generator exactly reproduces its committed assets", (t) 
 
   const generated = fs.readdirSync(path.join(tempDir, "assets")).sort();
   const gallery = read("docs/message-states.md");
-  assert.equal(generated.length, 64);
+  assert.equal(generated.length, 66);
   for (const file of generated) {
     assert.ok(
       gallery.includes(`../assets/${file}`),

@@ -9,8 +9,11 @@ import {
   cleanupTempRepo,
   createTempRepo,
   fakeGitEnv,
+  installBlockingPrettierFixture,
   readFile,
   run,
+  runAsync,
+  waitForPath,
   writeFile,
 } from "./helpers/temp-repo.mjs";
 
@@ -21,6 +24,32 @@ function runFixStaged(tempDir, options = {}) {
     tempDir,
     options,
   );
+}
+
+async function runFixStagedDuringPrettier(tempDir, mutate, env = {}) {
+  const ready = path.join(tempDir, "fixer-ready");
+  const release = path.join(tempDir, "fixer-release");
+  const execution = runAsync(
+    process.execPath,
+    [path.join(tempDir, "scripts", "fix-staged.mjs")],
+    tempDir,
+    {
+      env: {
+        ...process.env,
+        ...env,
+        FIXER_OUTPUT: '{ "alpha": 1 }\n',
+        FIXER_READY: ready,
+        FIXER_RELEASE: release,
+      },
+    },
+  );
+  try {
+    await waitForPath(ready);
+    await mutate();
+  } finally {
+    writeFile(release, "release\n");
+  }
+  return execution.completed;
 }
 
 test("shows info box when there are no staged fixable files", (t) => {
@@ -162,6 +191,7 @@ test("returns warning when fixes apply but lint issues remain", (t) => {
 
   assert.equal(result.status, 1);
   assert.match(output, /Manual attention still needed\./);
+  assert.match(output, /no-unused-vars/);
   assert.equal(readFile(tempDir, "src/warn.js"), "const value = 1;\n");
 });
 
@@ -220,17 +250,17 @@ test("errors when automatically fixed files cannot be restaged", (t) => {
   run("git", ["add", "src/restage.json"], tempDir);
 
   const result = runFixStaged(tempDir, {
-    env: fakeGitEnv(tempDir, "add --"),
+    env: fakeGitEnv(tempDir, "update-index -z --index-info"),
   });
 
   assert.equal(result.status, 1);
   assert.match(
     `${result.stdout}${result.stderr}`,
-    /Unable to restage fixed files/,
+    /Unable to apply automatic fixes safely/,
   );
 });
 
-test("tolerates an unreadable index snapshot and still reports clean", (t) => {
+test("fails closed when the target index snapshot is unreadable", (t) => {
   const tempDir = createTempRepo();
   t.after(() => cleanupTempRepo(tempDir));
 
@@ -238,13 +268,13 @@ test("tolerates an unreadable index snapshot and still reports clean", (t) => {
   writeFile(path.join(tempDir, "src", "clean.js"), 'console.log("x");\n');
   run("git", ["add", "src/clean.js"], tempDir);
 
-  // `git ls-files --stage -z` fails, so both index snapshots are null.
+  // Exact staging requires a readable initial target snapshot.
   const env = fakeGitEnv(tempDir, "ls-files --stage -z --");
   const result = runFixStaged(tempDir, { env });
   const output = `${result.stdout}${result.stderr}`;
 
-  assert.equal(result.status, 0);
-  assert.match(output, /already clean/i);
+  assert.equal(result.status, 1);
+  assert.match(output, /Unable to apply automatic fixes safely/);
 });
 
 test("refuses to fix a staged file missing from the working tree", (t) => {
@@ -279,6 +309,21 @@ test("reports already clean and pluralizes for multiple unchanged files", (t) =>
 
   assert.equal(result.status, 0);
   assert.match(output, /Checked 2 staged files/);
+});
+
+test("reports one already-clean staged file in the singular", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  writeFile(path.join(tempDir, "src", "clean.js"), "export const a = 1;\n");
+  run("git", ["add", "src/clean.js"], tempDir);
+
+  const result = runFixStaged(tempDir);
+
+  assert.equal(result.status, 0);
+  assert.match(
+    `${result.stdout}${result.stderr}`,
+    /Checked 1 staged file\. No automatic changes were needed\./,
+  );
 });
 
 test("applied-fix summary pluralizes multiple changed files", (t) => {
@@ -339,4 +384,101 @@ test("reports local install guidance when fixer peer tools are missing", (t) => 
   assert.equal(result.status, 1);
   assert.match(output, /Missing local tool\(s\): eslint, prettier/);
   assert.match(output, /npm install -D eslint@\^9 prettier@\^3/);
+});
+
+test("refuses a concurrent target auto-save without staging it", async (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const file = path.join(tempDir, "src", "race.json");
+  const initial = '{"alpha":1}\n';
+  const concurrent = '{"user":true}\n';
+  writeFile(file, initial);
+  run("git", ["add", "src/race.json"], tempDir);
+  const initialIndex = run("git", ["write-tree"], tempDir).stdout.trim();
+  installBlockingPrettierFixture(tempDir);
+
+  const result = await runFixStagedDuringPrettier(tempDir, () => {
+    writeFile(file, concurrent);
+  });
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 1);
+  assert.match(output, /Repository state changed while automatic fixes/);
+  assert.equal(readFile(tempDir, "src/race.json"), concurrent);
+  assert.equal(run("git", ["show", ":src/race.json"], tempDir).stdout, initial);
+  assert.equal(run("git", ["write-tree"], tempDir).stdout.trim(), initialIndex);
+});
+
+test("refuses concurrent target deletion and type replacement", async (t) => {
+  for (const replacement of ["missing", "directory"]) {
+    const tempDir = createTempRepo();
+    t.after(() => cleanupTempRepo(tempDir));
+    const file = path.join(tempDir, "src", `${replacement}.json`);
+    writeFile(file, '{"alpha":1}\n');
+    run("git", ["add", `src/${replacement}.json`], tempDir);
+    installBlockingPrettierFixture(tempDir);
+
+    const result = await runFixStagedDuringPrettier(tempDir, () => {
+      fs.rmSync(file);
+      if (replacement === "directory") {
+        fs.mkdirSync(file);
+      }
+    });
+
+    assert.equal(result.status, 1);
+    assert.match(
+      `${result.stdout}${result.stderr}`,
+      /Repository state changed while automatic fixes/,
+    );
+    assert.equal(fs.existsSync(file), replacement === "directory");
+    if (replacement === "directory") {
+      assert.equal(fs.lstatSync(file).isDirectory(), true);
+    }
+  }
+});
+
+test("preserves a concurrent index update and uses the fun refusal", async (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const target = path.join(tempDir, "src", "index-race.json");
+  writeFile(target, '{"alpha":1}\n');
+  run("git", ["add", "src/index-race.json"], tempDir);
+  writeFile(path.join(tempDir, ".commitmentrc.json"), '{"tone":"fun"}\n');
+  installBlockingPrettierFixture(tempDir);
+
+  const result = await runFixStagedDuringPrettier(tempDir, () => {
+    writeFile(path.join(tempDir, "concurrent.txt"), "user index work\n");
+    run("git", ["add", "concurrent.txt"], tempDir);
+  });
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 1);
+  assert.match(output, /changed the relationship status mid-fix/);
+  assert.match(output, /No surprise changes were invited/);
+  assert.equal(
+    run("git", ["show", ":concurrent.txt"], tempDir).stdout,
+    "user index work\n",
+  );
+  assert.equal(readFile(tempDir, "src/index-race.json"), '{"alpha":1}\n');
+});
+
+test("refuses when HEAD moves while staged fixes are computed", async (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const target = path.join(tempDir, "src", "head-race.json");
+  writeFile(target, '{"alpha":1}\n');
+  run("git", ["add", "src/head-race.json"], tempDir);
+  const originalHead = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+  installBlockingPrettierFixture(tempDir);
+
+  const result = await runFixStagedDuringPrettier(tempDir, () => {
+    run("git", ["commit", "-m", "concurrent commit"], tempDir);
+  });
+
+  assert.equal(result.status, 1);
+  assert.notEqual(
+    run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+    originalHead,
+  );
+  assert.equal(readFile(tempDir, "src/head-race.json"), '{"alpha":1}\n');
 });

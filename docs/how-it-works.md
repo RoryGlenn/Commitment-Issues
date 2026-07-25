@@ -115,10 +115,18 @@ bypass behavior.
 
 `commitment-issues` separates safe fix paths from normal advisory checks.
 
-| Command              | Safety rule                                                                   |
-| -------------------- | ----------------------------------------------------------------------------- |
-| `npm run fix:staged` | Only targets staged fixable files and refuses partially staged files.         |
-| `npm run commit:fix` | Only amends the latest unpushed commit when the tracked working tree is safe. |
+| Command              | Safety rule                                                            |
+| -------------------- | ---------------------------------------------------------------------- |
+| `npm run fix:staged` | Fixes captured staged bytes and refuses partial or concurrent changes. |
+| `npm run commit:fix` | Amends only the same clean, unpushed commit after final state checks.  |
+
+The fixers receive captured content through stdin instead of rewriting live
+project paths. Before staging, the command rechecks `HEAD`, the exact index
+file and tree, and target bytes, then places only known tool output into a
+prepared index under Git's lock. `commit:fix` repeats repository, worktree, and
+publication checks immediately before amending. If revalidation detects that
+another process edited, deleted, replaced, staged, committed, or published
+during the run, the command refuses and leaves that work out of its mutation.
 
 The tool prefers refusing a risky mutation over hiding or rewriting work unexpectedly.
 

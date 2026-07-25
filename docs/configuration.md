@@ -227,7 +227,8 @@ made absolute so Node cannot interpret a repository filename as an option.
   `commitment-issues commit-msg`; it stays silent when commitlint succeeds.
 - `blockPushOnTestFailure` turns pushed-file test failures into a hard gate.
 - When automatic fixes can still be applied safely after a commit, the hook suggests `npm run commit:fix`.
-- `npm run fix:staged` applies staged-only ESLint and Prettier fixes directly and restages the result.
+- `npm run fix:staged` applies ESLint and Prettier to captured staged bytes,
+  revalidates repository state, and stages only attributable output.
 - `npm run commit:fix` applies automatic fixes to the latest clean commit and amends it in place.
 
 ## TypeScript and mixed projects
@@ -573,9 +574,12 @@ Recognized keys with the wrong value type (for example a string where a boolean 
 - `scripts/init.mjs` — one-command setup for a consuming repo.
 - `scripts/prepush.mjs` — the advisory-by-default pre-push test runner; can become a blocking gate through configuration.
 - `scripts/doctor.mjs` — verifies and repairs the hook wiring.
-- `scripts/fix-staged.mjs` — applies staged-only ESLint/Prettier fixes and restages the result.
+- `scripts/fix-staged.mjs` — applies staged-only ESLint/Prettier fixes through
+  the concurrent-state transaction and stages exact output blobs.
 - `scripts/fix-staged-js.mjs` — file-list fixer task: ESLint fix followed by Prettier write.
-- `scripts/commit-fix.mjs` — applies automatic fixes to the latest clean commit and amends it in place.
+- `scripts/commit-fix.mjs` — applies automatic fixes to the latest clean,
+  unpushed commit and amends only after final repository and publication
+  revalidation.
 - `scripts/lib/` — shared helpers for UI, spawning, file heuristics, output parsing, advisory messages, and config loading.
 
 ## Continuous integration

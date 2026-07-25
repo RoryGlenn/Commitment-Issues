@@ -16,6 +16,7 @@ import {
   createTempRepo,
   fakeGitEnv,
   fsFailurePreload,
+  mutableProjectFileFailurePreload,
   readFile,
   repoRoot,
   run,
@@ -2048,45 +2049,71 @@ test("init preserves an uninspectable hook path and reports manual repair", (t) 
   assert.equal(fs.statSync(gitHook(tempDir, "pre-commit")).isDirectory(), true);
 });
 
-test("init reports a project-file write failure before installing hooks", (t) => {
-  const tempDir = createTempRepo();
-  t.after(() => cleanupTempRepo(tempDir));
-  writePackage(tempDir, {
-    name: "project-write-failure",
-    version: "1.0.0",
-    type: "module",
-  });
-  const packagePath = path.join(tempDir, "package.json");
-  const packageBefore = readFile(tempDir, "package.json");
-  const gitignoreBefore = readFile(tempDir, ".gitignore");
-  const preload = fsFailurePreload(tempDir);
+for (const fileName of ["package.json", ".commitmentrc.json", ".gitignore"]) {
+  test(`init keeps ${fileName} complete when its staged write fails`, (t) => {
+    const tempDir = createTempRepo();
+    t.after(() => cleanupTempRepo(tempDir));
+    writePackage(tempDir, {
+      name: "project-write-failure",
+      version: "1.0.0",
+      type: "module",
+    });
+    if (fileName === ".commitmentrc.json") {
+      writeFile(path.join(tempDir, fileName), "{}\n");
+    }
+    const projectPath = path.join(tempDir, fileName);
+    const projectBefore = fs.readFileSync(projectPath, "utf8");
+    const customHook = gitHook(tempDir, "pre-commit");
+    const customHookBefore = "#!/bin/sh\necho custom\n";
+    writeFile(customHook, customHookBefore);
+    const preload = mutableProjectFileFailurePreload(tempDir);
 
-  const result = run(
-    "node",
-    ["--import", preload, path.join(tempDir, "scripts", "init.mjs")],
-    tempDir,
-    {
-      env: {
-        ...process.env,
-        TEST_FS_FAILURE_METHOD: "openSync",
-        TEST_FS_FAILURE_PATH: packagePath,
+    const result = run(
+      "node",
+      ["--import", preload, path.join(tempDir, "scripts", "init.mjs")],
+      tempDir,
+      {
+        env: {
+          ...process.env,
+          TEST_FS_FAILURE_METHOD: "writeSync",
+          TEST_FS_FAILURE_PATH: projectPath,
+          TEST_FS_FAILURE_CODE: "ENOSPC",
+        },
       },
-    },
-  );
-  const output = `${result.stdout}${result.stderr}`;
+    );
+    const output = `${result.stdout}${result.stderr}`;
 
-  assert.equal(result.status, 1);
-  assert.match(output, /Could not update the project files/i);
-  assert.match(
-    output,
-    /filesystem write failed before hook installation began/i,
-  );
-  assert.doesNotMatch(output, /node:fs|EACCES|\s+at .*init\.mjs/);
-  assert.equal(readFile(tempDir, "package.json"), packageBefore);
-  assert.equal(readFile(tempDir, ".gitignore"), gitignoreBefore);
-  assert.equal(fs.existsSync(gitHook(tempDir, "pre-commit")), false);
-  assert.equal(fs.existsSync(gitHook(tempDir, "pre-push")), false);
-});
+    assert.equal(result.status, 1);
+    assert.match(output, /Could not update the project files/i);
+    assert.match(
+      output,
+      /filesystem write failed before hook installation began/i,
+    );
+    assert.doesNotMatch(output, /node:fs|ENOSPC|\s+at .*init\.mjs/);
+    assert.equal(fs.readFileSync(projectPath, "utf8"), projectBefore);
+    assert.doesNotThrow(() => JSON.parse(readFile(tempDir, "package.json")));
+    if (fs.existsSync(path.join(tempDir, ".commitmentrc.json"))) {
+      assert.doesNotThrow(() =>
+        JSON.parse(readFile(tempDir, ".commitmentrc.json")),
+      );
+    }
+    assert.equal(fs.readFileSync(customHook, "utf8"), customHookBefore);
+    assert.equal(fs.existsSync(gitHook(tempDir, "pre-push")), false);
+    assert.deepEqual(
+      fs
+        .readdirSync(tempDir)
+        .filter(
+          (entry) =>
+            entry.includes(".commitment-issues-") && entry.endsWith(".tmp"),
+        ),
+      [],
+    );
+
+    assert.equal(runInit(tempDir).status, 0);
+    assert.doesNotThrow(() => JSON.parse(readFile(tempDir, "package.json")));
+    assert.equal(fs.readFileSync(customHook, "utf8"), customHookBefore);
+  });
+}
 
 test("init reports hook write failures without a raw exception", (t) => {
   const tempDir = createTempRepo();

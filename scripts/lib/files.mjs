@@ -1,6 +1,7 @@
 // Copyright (c) 2026 RoryGlenn and commitment-issues contributors
 // SPDX-License-Identifier: MIT
 
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { loadPrecommitConfig } from "./config.mjs";
@@ -462,12 +463,147 @@ function sameProjectFileIdentity(left, right) {
   );
 }
 
+function sameOpenFileIdentity(left, right) {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function sameProjectFileAfterArtifactCleanup(left, right, removedLinks) {
+  return (
+    sameOpenFileIdentity(left, right) &&
+    left.birthtimeNs === right.birthtimeNs &&
+    left.mode === right.mode &&
+    left.uid === right.uid &&
+    left.gid === right.gid &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs &&
+    right.nlink === left.nlink - BigInt(removedLinks)
+  );
+}
+
 function projectFileChangedError(filePath) {
   const error = new Error(
     `Project file changed after safety inspection: ${filePath}`,
   );
   error.code = "ESTALE";
   return error;
+}
+
+function incompleteProjectFileWriteError(filePath) {
+  const error = new Error(`Project file staging was incomplete: ${filePath}`);
+  error.code = "EIO";
+  return error;
+}
+
+function mutableProjectFileTemporaryPath(filePath) {
+  const destination = path.resolve(filePath);
+  return path.join(
+    path.dirname(destination),
+    `.${path.basename(destination)}.commitment-issues-${process.pid}-${randomUUID()}.tmp`,
+  );
+}
+
+function mutableProjectFileTemporaryParts(filePath) {
+  const destination = path.resolve(filePath);
+  return {
+    directory: path.dirname(destination),
+    prefix: `.${path.basename(destination)}.commitment-issues-`,
+  };
+}
+
+function processIsRunning(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code !== "ESRCH";
+  }
+}
+
+function cleanupMutableProjectFileArtifacts(filePath) {
+  const { directory, prefix } = mutableProjectFileTemporaryParts(filePath);
+  const suffix = ".tmp";
+  const removed = [];
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    if (!entry.name.startsWith(prefix) || !entry.name.endsWith(suffix)) {
+      continue;
+    }
+    const identity = entry.name.slice(prefix.length, -suffix.length);
+    const match =
+      /^([1-9]\d*)-([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/u.exec(
+        identity,
+      );
+    if (!match || processIsRunning(Number(match[1]))) {
+      continue;
+    }
+    const artifactPath = path.join(directory, entry.name);
+    const stats = fs.lstatSync(artifactPath, { bigint: true });
+    const ownedByCurrentUser =
+      typeof process.getuid !== "function" ||
+      stats.uid === BigInt(process.getuid());
+    if (!stats.isFile() || !ownedByCurrentUser) {
+      throw projectFileChangedError(filePath);
+    }
+    fs.rmSync(artifactPath);
+    removed.push(stats);
+  }
+  return removed;
+}
+
+function removeOwnedTemporaryFile(temporaryPath, opened) {
+  if (!opened) {
+    return;
+  }
+  const current = inspectMutableProjectFile(temporaryPath);
+  if (
+    current.status === "regular" &&
+    sameOpenFileIdentity(opened, current.stats)
+  ) {
+    try {
+      fs.rmSync(temporaryPath);
+    } catch {
+      // A failure that happened before commit remains authoritative. The
+      // reserved random name makes any crash/failure artifact unambiguous.
+    }
+  }
+}
+
+function writeCompleteBuffer(descriptor, buffer, filePath) {
+  let offset = 0;
+  while (offset < buffer.length) {
+    const written = fs.writeSync(
+      descriptor,
+      buffer,
+      offset,
+      buffer.length - offset,
+      offset,
+    );
+    if (
+      !Number.isInteger(written) ||
+      written <= 0 ||
+      written > buffer.length - offset
+    ) {
+      throw incompleteProjectFileWriteError(filePath);
+    }
+    offset += written;
+  }
+}
+
+function syncParentDirectory(filePath) {
+  if (process.platform === "win32") {
+    return;
+  }
+  let descriptor;
+  try {
+    descriptor = fs.openSync(
+      path.dirname(path.resolve(filePath)),
+      fs.constants.O_RDONLY,
+    );
+    fs.fsyncSync(descriptor);
+  } finally {
+    if (descriptor !== undefined) {
+      fs.closeSync(descriptor);
+    }
+  }
 }
 
 /**
@@ -532,11 +668,11 @@ export function preflightMutableProjectFile(state, { remove = false } = {}) {
     return false;
   }
   try {
-    const accessPath =
-      state.status === "regular" && !remove
-        ? state.filePath
-        : path.dirname(path.resolve(state.filePath));
-    fs.accessSync(accessPath, fs.constants.W_OK);
+    const parent = path.dirname(path.resolve(state.filePath));
+    if (state.status === "regular" && !remove) {
+      fs.accessSync(state.filePath, fs.constants.W_OK);
+    }
+    fs.accessSync(parent, fs.constants.W_OK | fs.constants.X_OK);
     return mutableProjectFileUnchanged(state);
   } catch {
     return false;
@@ -544,46 +680,123 @@ export function preflightMutableProjectFile(state, { remove = false } = {}) {
 }
 
 /**
- * Write through a verified descriptor. Existing files are opened without
- * truncation, compared with both the inspected path and the open descriptor,
- * and only then replaced. Missing files use O_EXCL so a newly inserted link or
- * file cannot be followed.
+ * Stage complete replacement bytes under a private same-directory name, sync
+ * and revalidate them, then atomically replace an unchanged existing path.
+ * Missing destinations use a hard link as an atomic no-replace commit so a
+ * newly inserted link or file cannot be overwritten.
  * @param {ReturnType<typeof inspectMutableProjectFile>} state - Initial state.
  * @param {string} content - Complete replacement contents.
  */
 export function writeMutableProjectFile(state, content) {
-  if (state.status !== "regular" && state.status !== "missing") {
+  if (
+    (state.status !== "regular" && state.status !== "missing") ||
+    !mutableProjectFileUnchanged(state)
+  ) {
     throw projectFileChangedError(state.filePath);
   }
 
-  const flags =
+  const destination = path.resolve(state.filePath);
+  const removedArtifacts = cleanupMutableProjectFileArtifacts(destination);
+  const stateAfterCleanup = inspectMutableProjectFile(state.filePath);
+  const removedDestinationLinks =
+    state.status === "regular"
+      ? removedArtifacts.filter((stats) =>
+          sameOpenFileIdentity(state.stats, stats),
+        ).length
+      : 0;
+  const cleanupPreservedState =
     state.status === "missing"
-      ? fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL
-      : fs.constants.O_WRONLY;
+      ? stateAfterCleanup.status === "missing"
+      : stateAfterCleanup.status === "regular" &&
+        (sameProjectFileIdentity(state.stats, stateAfterCleanup.stats) ||
+          (removedDestinationLinks > 0 &&
+            sameProjectFileAfterArtifactCleanup(
+              state.stats,
+              stateAfterCleanup.stats,
+              removedDestinationLinks,
+            )));
+  if (!cleanupPreservedState) {
+    throw projectFileChangedError(state.filePath);
+  }
+  const expectedState = stateAfterCleanup;
+  const temporaryPath = mutableProjectFileTemporaryPath(destination);
+  const contentBuffer = Buffer.from(content, "utf8");
+  const mode =
+    expectedState.status === "regular"
+      ? Number(expectedState.stats.mode & 0o7777n)
+      : 0o666 & ~process.umask();
   let descriptor;
+  let opened;
+  let committed = false;
+  let writeError;
   try {
-    descriptor = fs.openSync(state.filePath, flags, 0o666);
-    const opened = fs.fstatSync(descriptor, { bigint: true });
-    const current = inspectMutableProjectFile(state.filePath);
-    const currentIsExpected =
-      current.status === "regular" &&
-      (state.status === "missing" ||
-        sameProjectFileIdentity(state.stats, current.stats));
+    descriptor = fs.openSync(
+      temporaryPath,
+      fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL,
+      0o600,
+    );
+    opened = fs.fstatSync(descriptor, { bigint: true });
+    if (!opened.isFile()) {
+      throw projectFileChangedError(state.filePath);
+    }
+    writeCompleteBuffer(descriptor, contentBuffer, state.filePath);
+    fs.fchmodSync(descriptor, mode);
+    const staged = fs.fstatSync(descriptor, { bigint: true });
     if (
-      !opened.isFile() ||
-      !currentIsExpected ||
-      !sameProjectFileIdentity(current.stats, opened)
+      !staged.isFile() ||
+      !sameOpenFileIdentity(opened, staged) ||
+      staged.size !== BigInt(contentBuffer.length)
+    ) {
+      throw incompleteProjectFileWriteError(state.filePath);
+    }
+    fs.fsyncSync(descriptor);
+    fs.closeSync(descriptor);
+    descriptor = undefined;
+
+    const stagedPath = inspectMutableProjectFile(temporaryPath);
+    if (
+      stagedPath.status !== "regular" ||
+      !sameProjectFileIdentity(staged, stagedPath.stats) ||
+      !mutableProjectFileUnchanged(expectedState)
     ) {
       throw projectFileChangedError(state.filePath);
     }
-    if (state.status === "regular") {
-      fs.ftruncateSync(descriptor, 0);
+
+    if (expectedState.status === "missing") {
+      fs.linkSync(temporaryPath, destination);
+      committed = true;
+      const destinationState = inspectMutableProjectFile(destination);
+      const temporaryState = inspectMutableProjectFile(temporaryPath);
+      if (
+        destinationState.status === "regular" &&
+        temporaryState.status === "regular" &&
+        sameProjectFileIdentity(destinationState.stats, temporaryState.stats)
+      ) {
+        fs.rmSync(temporaryPath);
+      } else {
+        throw projectFileChangedError(state.filePath);
+      }
+    } else {
+      fs.renameSync(temporaryPath, destination);
+      committed = true;
     }
-    fs.writeFileSync(descriptor, content, "utf8");
+    syncParentDirectory(destination);
+  } catch (error) {
+    writeError = error;
   } finally {
     if (descriptor !== undefined) {
-      fs.closeSync(descriptor);
+      try {
+        fs.closeSync(descriptor);
+      } catch {
+        // A prior staging error is authoritative.
+      }
     }
+    if (!committed) {
+      removeOwnedTemporaryFile(temporaryPath, opened);
+    }
+  }
+  if (writeError) {
+    throw writeError;
   }
 }
 

@@ -430,7 +430,9 @@ if (!dryRun) {
       errorBox([
         pc.bold(`Could not update ${escapeTerminalText(filePath)}.`),
         "",
-        pc.dim("Make the project file writable, then run init again."),
+        pc.dim(
+          "Make the project file and its directory writable, then run init again.",
+        ),
         pc.dim("No files or hooks were changed."),
       ]);
       process.exit(1);
@@ -465,8 +467,8 @@ if (!dryRun) {
       pc.bold("Could not update the project files."),
       "",
       pc.dim("A filesystem write failed before hook installation began."),
-      pc.dim("Fix the project-file permissions, then rerun init to repair"),
-      pc.dim("any partial project-file changes."),
+      pc.dim("Every project file remains a complete old or new version."),
+      pc.dim("Fix storage or permissions, then rerun init safely."),
     ]);
     process.exit(1);
   }

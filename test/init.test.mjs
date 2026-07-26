@@ -1883,6 +1883,7 @@ test("init refuses incomplete prepare syntax before changing project state", (t)
     'node -e "unterminated',
     "node --version \\",
     "node --version # trailing comment",
+    "cat <<EOF\ncontent\nEOF",
   ]) {
     const tempDir = createTempRepo();
     t.after(() => cleanupTempRepo(tempDir));
@@ -1963,6 +1964,25 @@ test("init repairs its historical broken suffix but refuses a displaced repair",
   assert.equal(readFile(displacedDir, ".gitignore"), beforeIgnore);
   assert.equal(fs.existsSync(gitHook(displacedDir, "pre-commit")), false);
   assert.equal(fs.existsSync(gitHook(displacedDir, "pre-push")), false);
+
+  const controlFlowDir = createTempRepo();
+  t.after(() => cleanupTempRepo(controlFlowDir));
+  writePackage(controlFlowDir, {
+    name: "control-flow-prepare-composition",
+    version: "1.0.0",
+    scripts: {
+      prepare: `if node --version; then ${repair}; fi`,
+    },
+  });
+  const controlFlowPackage = readFile(controlFlowDir, "package.json");
+  const controlFlowRefused = runInit(controlFlowDir);
+  const controlFlowOutput = `${controlFlowRefused.stdout}${controlFlowRefused.stderr}`;
+  assert.equal(controlFlowRefused.status, 1);
+  assert.match(controlFlowOutput, /Ambiguous package\.json prepare repair/);
+  assert.match(controlFlowOutput, /No files or hooks were changed/);
+  assert.equal(readFile(controlFlowDir, "package.json"), controlFlowPackage);
+  assert.equal(fs.existsSync(gitHook(controlFlowDir, "pre-commit")), false);
+  assert.equal(fs.existsSync(gitHook(controlFlowDir, "pre-push")), false);
 });
 
 test("init preserves postprepare while composing repair into prepare", (t) => {

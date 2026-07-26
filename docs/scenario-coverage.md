@@ -325,6 +325,12 @@ production-readiness workstream #130 is consolidated in the
   gitignore paths are replaced only inside the repository, preserving external
   aliases. Unit/subprocess:
   `test/lib-files.test.mjs`, `test/init.test.mjs`.
+- **INIT-037** — prepare repair composition preserves terminal semicolons,
+  single `&` operators, whitespace, quotes, and multiline project commands;
+  refuses incomplete syntax plus heredoc redirection; and treats a recognized
+  repair inside shell control flow or outside its exact generated terminal
+  position as ambiguous before project or hook mutation. Unit/fixture:
+  `test/hooks.test.mjs`, `test/init.test.mjs`.
 
 ## Uninstall
 

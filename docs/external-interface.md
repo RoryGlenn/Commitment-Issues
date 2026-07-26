@@ -215,14 +215,15 @@ remain data, and multiline commands retain their earlier lines. `uninstall`
 recognizes those exact terminal forms and restores the original project bytes.
 
 The analyzer refuses incomplete terminal operators (`&&`, `||`, `|`, or
-`;;`), unfinished quotes or escapes, a trailing shell comment, and unbalanced
-parentheses. A current or historical repair command is owned only when it is
-the one exact top-level command in a generated terminal position. If it is
-duplicated or followed by more project logic, `init` and `uninstall` stop
-before changing any file or hook, and `doctor` never reports the composition
-healthy. The printed remediation asks the user to remove only the displaced
-repair while retaining all project-owned commands. Quoted examples and
-argument-only mentions do not establish ownership.
+`;;`), unfinished quotes or escapes, a trailing shell comment, unbalanced
+parentheses, and heredoc or here-string redirection. A current or historical
+repair command is owned only when it is the one exact top-level command in a
+generated terminal position. If it is duplicated, followed by more project
+logic, or moved into shell control flow, `init` and `uninstall` stop before
+changing any file or hook, and `doctor` never reports the composition healthy.
+The printed remediation asks the user to remove only the displaced repair while
+retaining all project-owned commands. Quoted examples and argument-only
+mentions do not establish ownership.
 
 ## Setup removed by `uninstall`
 

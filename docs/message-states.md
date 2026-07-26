@@ -115,13 +115,15 @@ owner-selection cardinality error.
 
 ### Prepare composition refusal
 
-`Unsafe package.json prepare composition.` means the project-owned command ends
-with incomplete shell syntax, so `init` cannot add repair without guessing.
+`Unsafe package.json prepare composition.` means the project-owned command has
+incomplete shell syntax or heredoc-style redirection, so `init` cannot add
+repair without guessing.
 `Ambiguous package.json prepare repair.` means a recognized generated repair
-was moved away from its terminal position or duplicated. Init and uninstall
-both stop before changing any file or hook; the latter never prints a
-setup-removed claim. The box asks the user to retain every project command,
-remove only a displaced repair when applicable, and rerun the command.
+was moved into shell control flow, otherwise moved away from its terminal
+position, or duplicated. Init and uninstall both stop before changing any file
+or hook; the latter never prints a setup-removed claim. The box asks the user
+to retain every project command, remove only a displaced repair when
+applicable, and rerun the command.
 
 ### Hook-manager owner selection
 

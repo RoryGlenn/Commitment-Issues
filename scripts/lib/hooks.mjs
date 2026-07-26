@@ -180,6 +180,14 @@ function analyzeProjectPrepare(script) {
       comment = true;
       continue;
     }
+    if (character === "<" && body[index + 1] === "<") {
+      return {
+        safe: false,
+        ending: "invalid",
+        reason:
+          "scripts.prepare contains a heredoc or here-string redirection that cannot be composed safely",
+      };
+    }
     if (character === "(") {
       parenthesisDepth += 1;
       if (parenthesisDepth === 1) {
@@ -328,6 +336,21 @@ export function composePrepareRepair(projectScript, repairCommand) {
   };
 }
 
+const SHELL_COMMAND_PREFIXES = new Set([
+  "builtin",
+  "command",
+  "coproc",
+  "do",
+  "elif",
+  "else",
+  "exec",
+  "if",
+  "then",
+  "time",
+  "until",
+  "while",
+]);
+
 function commandPosition(script, index) {
   let cursor = index - 1;
   while (cursor >= 0 && /[ \t\r]/u.test(script[cursor])) {
@@ -336,7 +359,20 @@ function commandPosition(script, index) {
   if (cursor < 0) {
     return true;
   }
-  return ["\n", ";", "&", "|", "("].includes(script[cursor]);
+  if (["\n", ";", "&", "|", "(", ")", "{", "!"].includes(script[cursor])) {
+    return true;
+  }
+
+  const wordEnd = cursor + 1;
+  while (cursor >= 0 && /[a-z]/iu.test(script[cursor])) {
+    cursor -= 1;
+  }
+  const wordStart = cursor + 1;
+  const previousWord = script.slice(wordStart, wordEnd);
+  return (
+    SHELL_COMMAND_PREFIXES.has(previousWord) &&
+    commandPosition(script, wordStart)
+  );
 }
 
 function commandBoundary(script, index) {

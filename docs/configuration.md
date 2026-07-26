@@ -29,9 +29,10 @@ existing `prepare` command. Terminal semicolons, single `&` operators, trailing
 whitespace, quoted operators, and multiline commands are composed without
 losing the original bytes; `uninstall` restores those bytes exactly.
 Unfinished operators, quotes, escapes, comments, or parentheses are left for
-the user to complete. A recognized repair command that was duplicated or
-moved away from its generated terminal position is also left untouched with
-exact manual-cleanup guidance.
+the user to complete, and heredoc or here-string redirection is left unchanged
+for manual composition. A recognized repair command that was duplicated,
+moved into shell control flow, or otherwise moved away from its generated
+terminal position is also left untouched with exact manual-cleanup guidance.
 
 ### Existing hook-manager mode
 

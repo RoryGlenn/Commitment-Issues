@@ -77,10 +77,11 @@ Push pure logic **down into `scripts/lib/`** so it can be unit-tested directly; 
   composition path, and `inspectPrepareRepairScript(...)` is the shared
   init/doctor/uninstall ownership boundary. Do not append a raw `&&` suffix:
   preserve terminal semicolons, single `&` operators, trailing whitespace,
-  quoting, and multiline project logic; refuse incomplete syntax. Only one
-  recognized top-level repair in an exact generated terminal position is
-  mutable. A displaced or duplicate repair must stop before every project or
-  hook mutation with manual-cleanup guidance.
+  quoting, and multiline project logic; refuse incomplete syntax and heredoc
+  redirection. Only one recognized top-level repair in an exact generated
+  terminal position is mutable. A repair inside control flow, or any other
+  displaced or duplicate repair, must stop before every project or hook
+  mutation with manual-cleanup guidance.
 - Keep the guard Node-only and project-local: an absent
   `node_modules/commitment-issues/package.json` is the intentional production
   no-op, while a present package must import its exact CLI and preserve errors.

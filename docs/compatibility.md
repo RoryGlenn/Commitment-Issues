@@ -87,10 +87,10 @@ path without executing package code during dependency installation.
 
 Composition preserves terminal semicolons, single `&` operators, trailing
 whitespace, quoted operators, and multiline project logic across init and
-uninstall. Incomplete shell endings and a displaced or duplicate generated
-repair fail closed before project or hook mutation. The same analyzer runs on
-every supported operating system; the package never invokes a shell to inspect
-the command.
+uninstall. Incomplete shell endings, heredoc or here-string redirection, and a
+generated repair displaced into control flow or duplicated fail closed before
+project or hook mutation. The same analyzer runs on every supported operating
+system; the package never invokes a shell to inspect the command.
 
 Coexistence instead composes
 the same guard with `doctor --quiet --integration=<manager>`: installs warn

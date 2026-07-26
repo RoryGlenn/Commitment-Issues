@@ -184,8 +184,8 @@ test("prepare repair composition preserves safe project syntax and ownership", (
       composition: "and",
     },
     {
-      project: "echo 'single ; && | &'",
-      expected: `echo 'single ; && | &' && ${repair}`,
+      project: "echo 'single ; && | & <<EOF'",
+      expected: `echo 'single ; && | & <<EOF' && ${repair}`,
       composition: "and",
     },
     {
@@ -267,6 +267,9 @@ test("prepare repair analysis refuses incomplete or ambiguous shell edits", () =
     "(node --version)# trailing comment",
     "(node --version",
     "node --version)",
+    "cat <<EOF\ncontent\nEOF",
+    "cat <<-EOF\n\tcontent\nEOF",
+    "cat <<< content",
   ]) {
     const result = composePrepareRepair(project, repair);
     assert.equal(result.status, "unsafe", project);
@@ -325,6 +328,24 @@ test("prepare repair analysis refuses incomplete or ambiguous shell edits", () =
     ).status,
     "ambiguous",
   );
+  for (const controlFlow of [
+    `if ${repair}; then node --version; fi`,
+    `if node --version; then ${repair}; fi`,
+    `if false; then node --version; elif ${repair}; then :; fi`,
+    `if false; then node --version; else ${repair}; fi`,
+    `while ${repair}; do :; done`,
+    `until false; do ${repair}; done`,
+    `{ ${repair}; }`,
+    `case x in x) ${repair} ;; esac`,
+    `! ${repair}`,
+    `command ${repair}`,
+  ]) {
+    assert.equal(
+      inspectPrepareRepairScript(controlFlow).status,
+      "ambiguous",
+      controlFlow,
+    );
+  }
 
   for (const projectMention of [
     'echo "commitment-issues doctor --quiet"',
@@ -333,6 +354,7 @@ test("prepare repair analysis refuses incomplete or ambiguous shell edits", () =
     "echo commitment-issues doctor --quiet",
     "echo commitment-issues\\ doctor --quiet",
     "commitment-issues doctor --quietly",
+    `echo if ${repair}`,
   ]) {
     assert.deepEqual(inspectPrepareRepairScript(projectMention), {
       status: "project",

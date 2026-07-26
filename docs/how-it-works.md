@@ -61,9 +61,11 @@ The guard is composed after complete project logic, not appended blindly.
 Terminal semicolons and single `&` operators remain valid, trailing whitespace
 and multiline commands round-trip through uninstall, and shell operators
 inside quotes remain untouched. Incomplete shell endings are refused before
-setup changes. If someone later moves or duplicates the generated repair,
-`init`, `doctor`, and `uninstall` require explicit cleanup instead of guessing
-which project behavior to remove.
+setup changes; heredoc and here-string redirection are also preserved for
+manual composition. If someone later moves the generated repair into control
+flow, otherwise displaces it, or duplicates it, `init`, `doctor`, and
+`uninstall` require explicit cleanup instead of guessing which project
+behavior to remove.
 
 ### Existing-manager path
 

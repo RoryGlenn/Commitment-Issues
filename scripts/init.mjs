@@ -271,7 +271,7 @@ function refusePrepareComposition(reason, { ambiguous = false } = {}) {
     pc.dim(
       ambiguous
         ? "Remove only the displaced Commitment Issues repair command from scripts.prepare, keep every project-owned command, then run init again."
-        : "Make scripts.prepare one complete command without an unfinished operator, quote, escape, or trailing comment, then run init again.",
+        : "Make scripts.prepare one complete command without an unfinished operator, quote, escape, trailing comment, or heredoc redirection, then run init again.",
     ),
     pc.dim("No files or hooks were changed."),
   ]);

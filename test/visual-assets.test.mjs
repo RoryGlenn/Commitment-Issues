@@ -328,8 +328,11 @@ test("hero story pairs a reusable comparison with a 20–30 second real workflow
     /Without Commitment Issues: send\s*work, wait, find a mistake, and do it again/,
   );
   assert.match(svg, /mistake is spotted and fixed first/);
-  assert.match(launch, /next-release npm metadata/);
-  assert.match(launch, /\[ \] Confirm the live npm page/);
+  assert.match(launch, /live npm\s+metadata/);
+  assert.match(
+    launch,
+    /\[x\] Confirm the live npm page carries the new description and README from\s+v3\.5\.1/,
+  );
 
   const comparisonIndex = readme.indexOf("assets/before-after.svg");
   const demoIndex = readme.indexOf("assets/demo.gif");

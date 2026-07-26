@@ -90,6 +90,27 @@ test("uninstall removes generated setup and preserves shared project state", (t)
   );
 });
 
+test("init and uninstall preserve empty project-owned managed scripts", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const projectScripts = {
+    "commit:fix": "",
+    "fix:staged": "",
+    "test:precommit": "",
+    doctor: "",
+  };
+
+  writePackage(tempDir, {
+    name: "consumer",
+    version: "1.0.0",
+    scripts: projectScripts,
+  });
+
+  assert.equal(runScript(tempDir, "init").status, 0);
+  assert.equal(runScript(tempDir, "uninstall").status, 0);
+  assert.deepEqual(readPackage(tempDir).scripts, projectScripts);
+});
+
 test("uninstall rejects unknown options before removing generated setup", (t) => {
   const tempDir = createTempRepo();
   t.after(() => cleanupTempRepo(tempDir));

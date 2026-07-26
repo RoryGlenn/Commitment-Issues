@@ -213,6 +213,8 @@ becomes `<project> && <repair>;`; and a terminal `<project> &` becomes
 `<project> & <repair>`. Trailing whitespace remains trailing, quoted operators
 remain data, and multiline commands retain their earlier lines. `uninstall`
 recognizes those exact terminal forms and restores the original project bytes.
+`init` preserves empty command scripts but refuses empty/blank `prepare` before
+writes.
 
 The analyzer refuses incomplete terminal operators (`&&`, `||`, `|`, or
 `;;`), unfinished quotes or escapes, a trailing shell comment, unbalanced

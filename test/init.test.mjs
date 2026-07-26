@@ -144,6 +144,70 @@ test("init wires up hooks, scripts, and config; is idempotent", (t) => {
   assert.match(`${second.stdout}${second.stderr}`, /Already configured/);
 });
 
+for (const [description, projectValue] of [
+  ["empty", ""],
+  ["blank", " \t"],
+]) {
+  test(`init preserves ${description} project-owned managed command scripts`, (t) => {
+    const tempDir = createTempRepo();
+    t.after(() => cleanupTempRepo(tempDir));
+    const projectScripts = {
+      "commit:fix": projectValue,
+      "fix:staged": projectValue,
+      "test:precommit": projectValue,
+      doctor: projectValue,
+    };
+
+    writePackage(tempDir, {
+      name: "x",
+      version: "1.0.0",
+      private: true,
+      type: "module",
+      scripts: projectScripts,
+    });
+
+    const result = runInit(tempDir);
+    assert.equal(result.status, 0);
+    const scripts = readPackage(tempDir).scripts;
+    for (const [name, value] of Object.entries(projectScripts)) {
+      assert.equal(scripts[name], value, name);
+    }
+    assert.equal(scripts.prepare, prepareRepairCommand());
+  });
+}
+
+for (const [description, prepare] of [
+  ["empty", ""],
+  ["whitespace-only", " \t"],
+]) {
+  test(`init refuses a project-owned ${description} prepare script without writing`, (t) => {
+    const tempDir = createTempRepo();
+    t.after(() => cleanupTempRepo(tempDir));
+
+    writePackage(tempDir, {
+      name: "x",
+      version: "1.0.0",
+      private: true,
+      type: "module",
+      scripts: { prepare },
+    });
+    const packageBefore = readFile(tempDir, "package.json");
+    const gitignoreBefore = readFile(tempDir, ".gitignore");
+
+    const result = runInit(tempDir);
+    const output = `${result.stdout}${result.stderr}`;
+
+    assert.equal(result.status, 1);
+    assert.match(output, /Unsafe package\.json prepare composition/);
+    assert.match(output, /scripts\.prepare has no project command to preserve/);
+    assert.match(output, /No files or hooks were changed/);
+    assert.equal(readFile(tempDir, "package.json"), packageBefore);
+    assert.equal(readFile(tempDir, ".gitignore"), gitignoreBefore);
+    assert.equal(fs.existsSync(gitHook(tempDir, "pre-commit")), false);
+    assert.equal(fs.existsSync(gitHook(tempDir, "pre-push")), false);
+  });
+}
+
 test("init dry run suggests applying only when changes are pending", (t) => {
   const tempDir = createTempRepo();
   t.after(() => cleanupTempRepo(tempDir));

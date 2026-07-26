@@ -242,9 +242,10 @@ test("prepare repair composition preserves safe project syntax and ownership", (
   }
 
   assert.deepEqual(composePrepareRepair(" \n", repair), {
-    status: "composed",
-    script: repair,
-    composition: "standalone",
+    status: "unsafe",
+    script: null,
+    composition: null,
+    reason: "scripts.prepare has no project command to preserve",
   });
   assert.deepEqual(composePrepareRepair(42, repair), {
     status: "unsafe",

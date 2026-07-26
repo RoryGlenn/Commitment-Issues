@@ -331,6 +331,11 @@ production-readiness workstream #130 is consolidated in the
   repair inside shell control flow or outside its exact generated terminal
   position as ambiguous before project or hook mutation. Unit/fixture:
   `test/hooks.test.mjs`, `test/init.test.mjs`.
+- **INIT-038** — managed command-script collisions use key presence rather than
+  truthiness, preserving empty project-owned values; an empty or
+  whitespace-only project-owned `prepare` refuses before any project or hook
+  write because automatic repair cannot round-trip that exact value. Fixture:
+  `test/init.test.mjs`.
 
 ## Uninstall
 
@@ -365,6 +370,9 @@ production-readiness workstream #130 is consolidated in the
   file. Hardlinked package replacement and standalone-configuration removal
   preserve the external alias, and dry-run changes neither link. Unit/subprocess:
   `test/lib-files.test.mjs`, `test/uninstall.test.mjs`.
+- **UNINST-021** — setup followed by uninstall preserves empty project-owned
+  values for every managed command-script key while removing only exact
+  generated setup. Fixture: `test/uninstall.test.mjs`.
 
 ### Pre-commit checks
 

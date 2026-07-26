@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Empty project scripts survive `init`/`uninstall`; empty `prepare` fails
+  before writes.
 - Pre-commit linting, formatting, related-test discovery, and optional test
   execution now inspect one immutable tree created from an exact copy of the
   active Git index, including Git's temporary `commit --all` index. Unstaged or

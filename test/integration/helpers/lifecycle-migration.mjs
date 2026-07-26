@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crossSpawn from "cross-spawn";
-import { hookBody } from "../../../scripts/lib/hooks.mjs";
+import { hookBody, prepareRepairCommand } from "../../../scripts/lib/hooks.mjs";
 import {
   hasExactOutputLine,
   isSupportedMigrationManager,
@@ -19,7 +19,8 @@ export const MIGRATION_TARBALL_DIGEST_PREFIX =
 const PACKAGE_NAME = "commitment-issues";
 const PACKAGE_BIN = "scripts/cli.mjs";
 const PROJECT_PREPARE = "node scripts/project-prepare.mjs";
-const CANDIDATE_REPAIR = "commitment-issues doctor --quiet";
+const LEGACY_DIRECT_PREPARE = `${PROJECT_PREPARE} && commitment-issues doctor --quiet`;
+const CANDIDATE_REPAIR = prepareRepairCommand();
 const CANDIDATE_PREPARE = `${PROJECT_PREPARE} && ${CANDIDATE_REPAIR}`;
 const TOOL_VERSIONS = [
   "eslint@9.39.4",
@@ -777,7 +778,7 @@ function installPriorFixture(context, consumer, fixture) {
   }
   assertPrepareScript(
     consumer.repoDir,
-    fixture.version === "3.3.2" ? CANDIDATE_PREPARE : PROJECT_PREPARE,
+    fixture.version === "3.3.2" ? LEGACY_DIRECT_PREPARE : PROJECT_PREPARE,
   );
   commitAndPush(context, consumer.repoDir, 1, `${fixture.id} baseline`, {
     assertHooks: false,

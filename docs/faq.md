@@ -261,6 +261,11 @@ The uninstaller removes exact generated scripts, configuration, and owned hook
 bodies. It preserves customized hooks/scripts, shared ignores, ESLint, Prettier,
 the lockfile, and anything whose ownership cannot be proven.
 
+If the dependency was removed first, the generated `prepare` guard stays
+silent and exits successfully while the local package is absent, so it cannot
+break the next normal or production install. Reinstall the development
+dependency, then run `uninstall` to remove the remaining owned setup safely.
+
 ## Why is Node.js 22.11.0 the minimum?
 
 Node.js 22.11.0 is the first Node 22 LTS release and the minimum exercised by

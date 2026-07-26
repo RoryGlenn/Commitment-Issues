@@ -70,6 +70,17 @@ Push pure logic **down into `scripts/lib/`** so it can be unit-tested directly; 
 
 - `codeFilePattern`, `formatFilePattern`, `findTestFile`, `isTestExemptFile`, `collectTestsForFiles`, `shortFileList`. Use `isTestExemptFile` to honor `precommitChecks.testExempt` globs (e.g. `scripts/lib/**`).
 
+### `hooks.mjs`
+
+- `prepareRepairCommand(...)` and `prepareRepairCommands()` own the exact
+  consumer `prepare` guard. Keep it Node-only and project-local: an absent
+  `node_modules/commitment-issues/package.json` is the intentional production
+  no-op, while a present package must import its exact CLI and preserve errors.
+  Never replace the guard with `npx`, a package-manager runner, `PATH`, global,
+  ancestor-package, or network resolution. Keep init migration, uninstall
+  recognition, packed production lifecycle coverage, and canonical
+  compatibility docs synchronized.
+
 ### `fix-safety.mjs`
 
 - `captureFixSnapshot`, `runFixTools`, `applyFixOutputs`, and

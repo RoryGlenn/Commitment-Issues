@@ -30,6 +30,8 @@ import {
   legacyHuskyDirectoryState,
   legacyHuskyWiringPaths,
   leftoverHuskyHooks,
+  prepareRepairCommand,
+  prepareRepairCommands,
   removeLegacyHuskyWiring,
   writeHook,
 } from "../scripts/lib/hooks.mjs";
@@ -63,6 +65,82 @@ function localHookInvocation(name) {
   }`;
   return command;
 }
+
+function prepareRepairSource(command) {
+  const match = /^node -e "(?<source>[^"]+)"$/u.exec(command);
+  assert.ok(match?.groups?.source, `unexpected prepare command: ${command}`);
+  return match.groups.source;
+}
+
+test("prepare repair commands invoke only the installed project package", (t) => {
+  const tempDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "prepare repair $() ` & "),
+  );
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+
+  const standalone = prepareRepairCommand();
+  const commands = prepareRepairCommands();
+  assert.deepEqual(commands, [
+    standalone,
+    prepareRepairCommand("husky"),
+    prepareRepairCommand("lefthook"),
+    prepareRepairCommand("pre-commit"),
+  ]);
+  assert.equal(new Set(commands).size, commands.length);
+  assert.match(standalone, /node_modules\/commitment-issues/u);
+  assert.doesNotMatch(
+    standalone,
+    /\bnpx\b|\bnpm\b|\bpnpm\b|\byarn\b|\bbunx?\b/u,
+  );
+  assert.throws(
+    () => prepareRepairCommand("unknown"),
+    /Unsupported hook manager: unknown/u,
+  );
+
+  const absent = run(
+    process.execPath,
+    ["-e", prepareRepairSource(standalone)],
+    tempDir,
+  );
+  assert.equal(absent.status, 0, absent.stderr);
+  assert.equal(absent.stdout, "");
+  assert.equal(absent.stderr, "");
+
+  const packageDir = path.join(tempDir, "node_modules", "commitment-issues");
+  const cliDir = path.join(packageDir, "scripts");
+  const invocationLog = path.join(tempDir, "repair-argv.json");
+  fs.mkdirSync(cliDir, { recursive: true });
+  fs.writeFileSync(path.join(packageDir, "package.json"), "{}\n");
+  fs.writeFileSync(
+    path.join(cliDir, "cli.mjs"),
+    "import fs from 'node:fs';\n" +
+      "fs.writeFileSync(process.env.PREPARE_REPAIR_LOG, JSON.stringify(process.argv.slice(2)));\n",
+  );
+
+  const available = run(
+    process.execPath,
+    ["-e", prepareRepairSource(prepareRepairCommand("lefthook"))],
+    tempDir,
+    {
+      env: { ...process.env, PREPARE_REPAIR_LOG: invocationLog },
+    },
+  );
+  assert.equal(available.status, 0, available.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(invocationLog, "utf8")), [
+    "doctor",
+    "--quiet",
+    "--integration=lefthook",
+  ]);
+
+  fs.rmSync(path.join(cliDir, "cli.mjs"));
+  const corrupt = run(
+    process.execPath,
+    ["-e", prepareRepairSource(standalone)],
+    tempDir,
+  );
+  assert.notEqual(corrupt.status, 0);
+  assert.match(corrupt.stderr, /ERR_MODULE_NOT_FOUND/u);
+});
 
 test("Lefthook files producer emits only the fixed package sentinel", (t) => {
   const dir = fs.mkdtempSync(

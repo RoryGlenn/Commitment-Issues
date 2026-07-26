@@ -237,7 +237,11 @@ historical starting versions are not a separate compatibility claim.
 Run the new version's `init` explicitly after changing dependencies. Package
 installation or peer removal does not guarantee that the consuming project's
 root `prepare` runs during that same command. Once `init` has added or composed
-the repair command, later normal installs can self-heal clone-local hooks.
+the repair command, later normal installs can self-heal clone-local hooks. A
+production install that omits the development package, or an accidental
+package-first removal, leaves that guard silent and successful; it never falls
+through to `npx`, a global binary, or the network. Reinstall the package before
+running `uninstall` when the generated setup also needs removal.
 
 ## Downgrades and manual rollback
 

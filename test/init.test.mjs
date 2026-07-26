@@ -24,7 +24,11 @@ import {
   writeFile,
 } from "./helpers/temp-repo.mjs";
 import { HUSKY_V9_RUNTIME } from "./helpers/hook-manager-fixtures.mjs";
-import { hookInvocation, hookManagerSnippets } from "../scripts/lib/hooks.mjs";
+import {
+  hookInvocation,
+  hookManagerSnippets,
+  prepareRepairCommand,
+} from "../scripts/lib/hooks.mjs";
 
 function hookSuggestionPattern(name) {
   const subcommand =
@@ -116,7 +120,7 @@ test("init wires up hooks, scripts, and config; is idempotent", (t) => {
   assert.equal(pkg.scripts["commit:fix"], "commitment-issues commit-fix");
   assert.equal(pkg.scripts["fix:staged"], "commitment-issues fix-staged");
   assert.equal(pkg.scripts.doctor, "commitment-issues doctor");
-  assert.equal(pkg.scripts.prepare, "commitment-issues doctor --quiet");
+  assert.equal(pkg.scripts.prepare, prepareRepairCommand());
   // No hook-runner config is written: staged fixes run through the bin.
   assert.equal("lint-staged" in pkg, false);
   assert.equal(pkg.precommitChecks.advisePushTests, true);
@@ -266,7 +270,7 @@ test("init coexists with Husky without rewriting manager-owned hooks", (t) => {
   assert.equal(fs.existsSync(gitHook(tempDir, "pre-commit")), false);
   assert.equal(
     readPackage(tempDir).scripts.prepare,
-    "husky && commitment-issues doctor --quiet --integration=husky",
+    `husky && ${prepareRepairCommand("husky")}`,
   );
 
   const packageAfterFirst = readFile(tempDir, "package.json");
@@ -289,10 +293,7 @@ test("init coexists with Husky without rewriting manager-owned hooks", (t) => {
 
   const migrateToNative = runInit(tempDir);
   assert.equal(migrateToNative.status, 0);
-  assert.equal(
-    readPackage(tempDir).scripts.prepare,
-    "commitment-issues doctor --quiet",
-  );
+  assert.equal(readPackage(tempDir).scripts.prepare, prepareRepairCommand());
   assert.equal(hooksPath(tempDir), "");
   assert.ok(fs.existsSync(gitHook(tempDir, "pre-commit")));
   assert.ok(fs.existsSync(gitHook(tempDir, "pre-push")));
@@ -578,7 +579,7 @@ test("init automatic integration requires and selects exactly one owner", (t) =>
   assert.match(`${oneOwner.stdout}${oneOwner.stderr}`, /lefthook coexistence/i);
   assert.equal(
     readPackage(oneOwnerDir).scripts.prepare,
-    "commitment-issues doctor --quiet --integration=lefthook",
+    prepareRepairCommand("lefthook"),
   );
   assert.equal(readFile(oneOwnerDir, "lefthook.yml"), managerConfig);
   assert.equal(fs.existsSync(gitHook(oneOwnerDir, "pre-commit")), false);
@@ -660,7 +661,7 @@ test("init replaces its integration suffix without duplicating custom prepare", 
   assert.equal(result.status, 0);
   assert.equal(
     readPackage(tempDir).scripts.prepare,
-    "node ./scripts/build-assets.mjs && commitment-issues doctor --quiet --integration=lefthook",
+    `node ./scripts/build-assets.mjs && ${prepareRepairCommand("lefthook")}`,
   );
 
   const pkg = readPackage(tempDir);
@@ -670,7 +671,7 @@ test("init replaces its integration suffix without duplicating custom prepare", 
   assert.equal(exactOwned.status, 0);
   assert.equal(
     readPackage(tempDir).scripts.prepare,
-    "commitment-issues doctor --quiet --integration=lefthook",
+    prepareRepairCommand("lefthook"),
   );
 });
 
@@ -1475,7 +1476,7 @@ test("init upgrades a legacy 1.x (vendored) setup to the bin", (t) => {
   assert.equal(result.status, 0);
 
   const pkg = readPackage(tempDir);
-  assert.equal(pkg.scripts.prepare, "commitment-issues doctor --quiet");
+  assert.equal(pkg.scripts.prepare, prepareRepairCommand());
   assert.equal(pkg.scripts["commit:fix"], "commitment-issues commit-fix");
   assert.equal(pkg.scripts.doctor, "commitment-issues doctor");
   assert.equal(pkg.precommitChecks.advisePushTests, true);
@@ -1804,7 +1805,7 @@ test("init preserves an unrelated prepare and appends repair", (t) => {
   const pkg = readPackage(tempDir);
   assert.equal(
     pkg.scripts.prepare,
-    "node ./scripts/build-assets.mjs && commitment-issues doctor --quiet",
+    `node ./scripts/build-assets.mjs && ${prepareRepairCommand()}`,
   );
   assert.equal(pkg.scripts.doctor, "commitment-issues doctor");
   assert.match(output, /- script prepare repair/);
@@ -1835,7 +1836,7 @@ test("init preserves postprepare while composing repair into prepare", (t) => {
   const pkg = readPackage(tempDir);
   assert.equal(
     pkg.scripts.prepare,
-    "node ./scripts/build-assets.mjs && commitment-issues doctor --quiet",
+    `node ./scripts/build-assets.mjs && ${prepareRepairCommand()}`,
   );
   assert.equal(pkg.scripts.postprepare, "node ./scripts/announce-build.mjs");
   assert.match(output, /- script prepare repair/);
@@ -2348,7 +2349,7 @@ test("init accepts empty scripts and precommitChecks objects", (t) => {
   const result = runInit(tempDir);
   assert.equal(result.status, 0);
   const pkg = readPackage(tempDir);
-  assert.equal(pkg.scripts.prepare, "commitment-issues doctor --quiet");
+  assert.equal(pkg.scripts.prepare, prepareRepairCommand());
   assert.equal(pkg.precommitChecks.advisePushTests, true);
 });
 

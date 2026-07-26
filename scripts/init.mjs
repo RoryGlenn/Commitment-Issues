@@ -23,6 +23,8 @@ import {
   legacyHuskyDirectoryState,
   leftoverHuskyHooks,
   legacyHuskyWiringPaths,
+  prepareRepairCommand,
+  prepareRepairCommands,
   removeLegacyHuskyWiring,
   writeHook,
 } from "./lib/hooks.mjs";
@@ -247,9 +249,7 @@ pkg.scripts ??= {};
 // reinstall. Compose it after a project-owned `prepare` command because Yarn
 // Classic does not run `postprepare`. The exact suffix is idempotent and can be
 // removed safely by uninstall without disturbing the project command.
-const desiredRepair = `${BIN} doctor --quiet${
-  integrationManager ? ` --integration=${integrationManager}` : ""
-}`;
+const desiredRepair = prepareRepairCommand(integrationManager);
 const repairSuffix = ` && ${desiredRepair}`;
 const legacyPrepare = [
   "husky",
@@ -257,11 +257,15 @@ const legacyPrepare = [
   "husky install",
   "node scripts/doctor.mjs --quiet",
 ];
-const ownedRepairCommands = [
+const directRepairCommands = [
   `${BIN} doctor --quiet`,
   ...HOOK_MANAGERS.map(
     (manager) => `${BIN} doctor --quiet --integration=${manager}`,
   ),
+];
+const ownedRepairCommands = [
+  ...prepareRepairCommands(),
+  ...directRepairCommands,
 ];
 const ownedRepairSuffixes = ownedRepairCommands.map(
   (command) => ` && ${command}`,

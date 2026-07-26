@@ -488,7 +488,7 @@ test("precommit JSON exposes stable debug check, rule, and subtype ids", (t) => 
   assert.equal(finding.severity, "warning");
 
   result = cli(tempDir, ["precommit", "--json"], {
-    env: fakeGitEnv(tempDir, "diff --cached -U0"),
+    env: fakeGitEnv(tempDir, "diff-tree --no-commit-id --no-renames -r -U0"),
   });
   payload = jsonPayload(result);
   assert.equal(result.status, 0);
@@ -649,7 +649,7 @@ test("blocking secret-scan JSON distinguishes an unavailable scanner", (t) => {
   run("git", ["add", "src/clean.txt"], tempDir);
 
   const result = cli(tempDir, ["precommit", "--json"], {
-    env: fakeGitEnv(tempDir, "diff --cached -U0"),
+    env: fakeGitEnv(tempDir, "diff-tree --no-commit-id --no-renames -r -U0"),
   });
   const payload = jsonPayload(result);
   const secretCheck = payload.checks.find((check) => check.id === "secrets");

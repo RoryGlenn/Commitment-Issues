@@ -183,7 +183,10 @@ test("an advisory secret scan remains fail-open when Git cannot inspect the diff
 
   stageSecretFile(tempDir);
 
-  const env = fakeGitEnv(tempDir, "diff --cached -U0");
+  const env = fakeGitEnv(
+    tempDir,
+    "diff-tree --no-commit-id --no-renames -r -U0",
+  );
   const result = runPrecommit(tempDir, { env });
   const output = `${result.stdout}${result.stderr}`;
 
@@ -199,7 +202,10 @@ test("an unavailable advisory scan still reports a staged dotenv file", (t) => {
   writeFile(path.join(tempDir, ".env"), "APP_MODE=dev\n");
   run("git", ["add", "-f", ".env"], tempDir);
 
-  const env = fakeGitEnv(tempDir, "diff --cached -U0");
+  const env = fakeGitEnv(
+    tempDir,
+    "diff-tree --no-commit-id --no-renames -r -U0",
+  );
   const result = runPrecommit(tempDir, { env });
   const output = `${result.stdout}${result.stderr}`;
 
@@ -216,7 +222,10 @@ test("blockOnSecrets fails closed when Git returns a nonzero diff status", (t) =
   setPrecommitConfig(tempDir, { blockOnSecrets: true });
   stageSecretFile(tempDir);
 
-  const env = fakeGitEnv(tempDir, "diff --cached -U0");
+  const env = fakeGitEnv(
+    tempDir,
+    "diff-tree --no-commit-id --no-renames -r -U0",
+  );
   const result = runPrecommit(tempDir, { env });
   const output = `${result.stdout}${result.stderr}`;
 
@@ -236,7 +245,7 @@ test("blockOnSecrets fails closed when Git returns malformed patch data", (t) =>
 
   const env = fakeGitEnv(
     tempDir,
-    "diff --cached -U0",
+    "diff-tree --no-commit-id --no-renames -r -U0",
     0,
     "not a unified diff\n",
   );

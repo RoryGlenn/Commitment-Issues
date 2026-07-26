@@ -100,11 +100,21 @@ priority without consuming it. Linked worktrees share the marker. JSON runs do
 not display or consume it, and projects can opt out with
 `showWelcomeOnFirstCommit: false`.
 
-The pre-commit hook then inspects staged files.
+The pre-commit hook then copies the active index and asks Git to write one
+immutable future commit tree from that copy. Checkable blobs are materialized
+byte-for-byte in a disposable repository without checkout filters or
+line-ending conversion. ESLint, Prettier, related-test discovery, and optional
+tests run there while their executables and installed dependencies still come
+from the real project.
 
 - Git pathname lists are requested with NUL delimiters. Leading/trailing
   whitespace, tabs, newlines, and Unicode are preserved exactly when paths are
   passed to checks or fixers.
+- Unstaged and untracked files are absent from the disposable tree, so they
+  cannot hide a staged problem, satisfy or enter a test check, or change the
+  bytes examined because of `core.autocrlf` or clean/smudge filters.
+- Deleting a test rechecks the source/test relationship in the resulting tree;
+  removing the only matching test is not treated as an automatic no-op.
 - If there are no relevant project files, the commit continues.
 - If relevant files are staged, the hook runs configured checks.
 - Code checks can report lint issues, formatting drift, missing tests, and optional staged-related test failures.

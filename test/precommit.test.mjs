@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
+import { hookBody } from "../scripts/lib/hooks.mjs";
 import { countTerminalBoxes } from "./helpers/output.mjs";
 import {
   cleanupTempRepo,
@@ -14,6 +15,7 @@ import {
   fakeGitEnv,
   installInterruptibleProcessFixture,
   readFile,
+  readHeadFile,
   run,
   runAsync,
   setPrecommitConfig,
@@ -30,6 +32,12 @@ function runHook(tempDir, options = {}) {
     tempDir,
     options,
   );
+}
+
+function installRealPrecommitHook(tempDir) {
+  const hookPath = path.join(tempDir, ".git", "hooks", "pre-commit");
+  writeFile(hookPath, hookBody("pre-commit"));
+  fs.chmodSync(hookPath, 0o755);
 }
 
 test("manager-composed pre-commit honors the project-wide skip switch", (t) => {
@@ -215,12 +223,48 @@ test("does not flag source files that have a matching test in test/", (t) => {
     "export const widget = () => 1;\n",
   );
   writeFile(path.join(tempDir, "test", "widget.test.mjs"), "export {};\n");
-  run("git", ["add", "src/widget.mjs"], tempDir);
+  run("git", ["add", "src/widget.mjs", "test/widget.test.mjs"], tempDir);
 
   const result = runHook(tempDir);
   const output = `${result.stdout}${result.stderr}`;
 
   assert.doesNotMatch(output, /missing unit tests/);
+});
+
+test("does not let an untracked matching test satisfy the staged tree", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  setPrecommitConfig(tempDir, {
+    protectedBranches: [],
+    runStagedTests: true,
+  });
+
+  writeFile(
+    path.join(tempDir, "src", "untracked-test.mjs"),
+    "export const value = 1;\n",
+  );
+  writeFile(
+    path.join(tempDir, "test", "untracked-test.test.mjs"),
+    'import test from "node:test";\ntest("untracked", () => {});\n',
+  );
+  run("git", ["add", "src/untracked-test.mjs"], tempDir);
+
+  const result = run(
+    "node",
+    [path.join(tempDir, "scripts", "precommit.mjs"), "--json"],
+    tempDir,
+  );
+  const payload = JSON.parse(result.stdout);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    payload.checks.find((check) => check.id === "missing-tests").status,
+    "advisory",
+  );
+  assert.deepEqual(
+    payload.checks.find((check) => check.id === "staged-tests").details.files,
+    [],
+  );
 });
 
 test("requireTests:false disables the missing-test check", (t) => {
@@ -410,7 +454,7 @@ test("finds a matching .test.ts for a TypeScript source", (t) => {
 
   writeFile(path.join(tempDir, "src", "thing.ts"), "export const thing = 1;\n");
   writeFile(path.join(tempDir, "test", "thing.test.ts"), "export {};\n");
-  run("git", ["add", "src/thing.ts"], tempDir);
+  run("git", ["add", "src/thing.ts", "test/thing.test.ts"], tempDir);
 
   const result = runHook(tempDir);
   const output = `${result.stdout}${result.stderr}`;
@@ -574,7 +618,10 @@ test("shows info when only non-checkable files are staged", (t) => {
 test("distinguishes a deletion-only commit from nothing staged", (t) => {
   const tempDir = createTempRepo();
   t.after(() => cleanupTempRepo(tempDir));
-  setPrecommitConfig(tempDir, { hookOutput: "normal" });
+  setPrecommitConfig(tempDir, {
+    hookOutput: "normal",
+    protectedBranches: [],
+  });
 
   run("git", ["rm", "README.md"], tempDir);
 
@@ -583,6 +630,34 @@ test("distinguishes a deletion-only commit from nothing staged", (t) => {
 
   assert.match(output, /Deletion-only commit/);
   assert.doesNotMatch(output, /Stage changes with git add/);
+});
+
+test("deleting a matching test evaluates the resulting source tree", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  setPrecommitConfig(tempDir, { protectedBranches: [] });
+  writeFile(
+    path.join(tempDir, "src", "kept-source.mjs"),
+    "export const kept = true;\n",
+  );
+  writeFile(
+    path.join(tempDir, "test", "kept-source.test.mjs"),
+    'import test from "node:test";\ntest("kept", () => {});\n',
+  );
+  run(
+    "git",
+    ["add", "src/kept-source.mjs", "test/kept-source.test.mjs"],
+    tempDir,
+  );
+  run("git", ["commit", "-m", "add source and test"], tempDir);
+  run("git", ["rm", "test/kept-source.test.mjs"], tempDir);
+
+  const result = runHook(tempDir);
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 0);
+  assert.match(output, /source file missing unit tests/);
+  assert.match(output, /src\/kept-source\.mjs/);
 });
 
 test("runs staged tests and warns when they fail (opt-in)", (t) => {
@@ -637,6 +712,98 @@ test("runs staged tests and stays clean when they pass (opt-in)", (t) => {
   const output = `${result.stdout}${result.stderr}`;
 
   assert.doesNotMatch(output, /failing/);
+});
+
+test("runs tests from staged bytes instead of their unstaged contents", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  setPrecommitConfig(tempDir, {
+    protectedBranches: [],
+    requireTests: false,
+    runStagedTests: true,
+  });
+  const passing =
+    'import test from "node:test";\n' +
+    'import assert from "node:assert/strict";\n' +
+    'test("snapshot", () => assert.equal(1, 1));\n';
+  const failing =
+    'import test from "node:test";\n' +
+    'import assert from "node:assert/strict";\n' +
+    'test("snapshot", () => assert.equal(1, 2));\n';
+  const testPath = path.join(tempDir, "test", "snapshot.test.mjs");
+
+  writeFile(testPath, passing);
+  run("git", ["add", "test/snapshot.test.mjs"], tempDir);
+  writeFile(testPath, failing);
+  let result = runHook(tempDir);
+  assert.doesNotMatch(`${result.stdout}${result.stderr}`, /test file failing/);
+
+  run("git", ["add", "test/snapshot.test.mjs"], tempDir);
+  writeFile(testPath, passing);
+  result = runHook(tempDir);
+  assert.match(`${result.stdout}${result.stderr}`, /test file failing/);
+});
+
+test("checks canonical staged LF bytes when the worktree contains CRLF", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  setPrecommitConfig(tempDir, {
+    protectedBranches: [],
+    requireTests: false,
+  });
+  run("git", ["config", "core.autocrlf", "true"], tempDir);
+  const file = path.join(tempDir, "src", "line-endings.json");
+  const lf = '{\n  "value": true\n}\n';
+  const crlf = lf.replaceAll("\n", "\r\n");
+  writeFile(file, lf);
+  run("git", ["add", "src/line-endings.json"], tempDir);
+  fs.writeFileSync(file, crlf);
+
+  const result = runHook(tempDir);
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 0);
+  assert.doesNotMatch(output, /Prettier|formatting issue/);
+  assert.equal(
+    run("git", ["show", ":src/line-endings.json"], tempDir).stdout,
+    lf,
+  );
+  assert.deepEqual(fs.readFileSync(file), Buffer.from(crlf));
+});
+
+test("real pre-commit hook reports and commits the exact staged bytes", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  setPrecommitConfig(tempDir, {
+    protectedBranches: [],
+    requireTests: false,
+  });
+  installRealPrecommitHook(tempDir);
+  const file = path.join(tempDir, "src", "partial.json");
+  const unformatted = '{"value":1}\n';
+  const formatted = '{\n  "value": 1\n}\n';
+
+  writeFile(file, unformatted);
+  run("git", ["add", "src/partial.json"], tempDir);
+  writeFile(file, formatted);
+  let commit = run("git", ["commit", "-m", "staged bad"], tempDir);
+
+  assert.equal(commit.status, 0, commit.stderr);
+  assert.match(`${commit.stdout}${commit.stderr}`, /formatting issues/);
+  assert.equal(readHeadFile(tempDir, "src/partial.json"), unformatted);
+  assert.equal(fs.readFileSync(file, "utf8"), formatted);
+
+  run("git", ["add", "src/partial.json"], tempDir);
+  writeFile(file, unformatted);
+  commit = run("git", ["commit", "-m", "staged clean"], tempDir);
+
+  assert.equal(commit.status, 0, commit.stderr);
+  assert.doesNotMatch(
+    `${commit.stdout}${commit.stderr}`,
+    /need Prettier formatting|Prettier failed/,
+  );
+  assert.equal(readHeadFile(tempDir, "src/partial.json"), formatted);
+  assert.equal(fs.readFileSync(file, "utf8"), unformatted);
 });
 
 test("default staged Node tests treat option-like paths as files", (t) => {
@@ -702,6 +869,40 @@ test("continues advisory when staged pathname output is malformed", (t) => {
 
   assert.equal(result.status, 0);
   assert.match(output, /Unable to inspect staged files/);
+});
+
+test("continues without claims when the exact staged tree cannot materialize", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+
+  writeFile(path.join(tempDir, "src", "x.js"), "export const x = 1;\n");
+  run("git", ["add", "src/x.js"], tempDir);
+  const head = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+  run(
+    "git",
+    ["update-index", "--add", "--cacheinfo", `160000,${head},vendor/submodule`],
+    tempDir,
+  );
+
+  const result = runHook(tempDir);
+  const output = `${result.stdout}${result.stderr}`;
+  assert.equal(result.status, 0);
+  assert.match(output, /Unable to inspect the exact staged tree/);
+  assert.match(output, /Submodule entry cannot be materialized safely/);
+  assert.doesNotMatch(output, /tests passing|formatting clean|lint errors/);
+
+  const jsonResult = run(
+    "node",
+    [path.join(tempDir, "scripts", "precommit.mjs"), "--json"],
+    tempDir,
+  );
+  assert.equal(jsonResult.status, 0);
+  const payload = JSON.parse(jsonResult.stdout);
+  assert.equal(payload.status, "advisory");
+  assert.equal(
+    payload.checks.find((check) => check.id === "staged-tree")?.status,
+    "failed",
+  );
 });
 
 test("reports a timeout when tools exceed the configured limit", (t) => {
@@ -803,7 +1004,7 @@ test("reports when ESLint cannot complete (broken config)", (t) => {
   );
   setPrecommitConfig(tempDir, { requireTests: false });
   writeFile(path.join(tempDir, "src", "x.js"), "export const x = 1;\n");
-  run("git", ["add", "src/x.js"], tempDir);
+  run("git", ["add", "eslint.config.js", "src/x.js"], tempDir);
 
   const result = runHook(tempDir);
   const output = `${result.stdout}${result.stderr}`;
@@ -1108,7 +1309,7 @@ test(
       "export const x = 1;\n",
     );
     writeFile(path.join(tempDir, ...relatedTest.split("/")), "export {};\n");
-    run("git", ["add", "--", source, relatedTest], tempDir);
+    run("git", ["add", "--", "record-tests.mjs", source, relatedTest], tempDir);
 
     const result = runHook(tempDir);
 

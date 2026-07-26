@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Pre-commit linting, formatting, related-test discovery, and optional test
+  execution now inspect one immutable tree created from an exact copy of the
+  Git index. Unstaged or untracked files can no longer hide staged problems,
+  satisfy missing-test checks, enter test runs, or create false CRLF/filter
+  warnings; deletion-only commits also evaluate source/test relationships in
+  the resulting commit tree without changing partial staging.
 - `init` now composes install-time repair safely when a project-owned
   `prepare` ends in a semicolon, background operator, trailing whitespace,
   quoted shell text, or multiple lines. It repairs the exact malformed suffix

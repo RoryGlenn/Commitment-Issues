@@ -49,6 +49,7 @@
     "scripts/lib/push-base.mjs",
     "scripts/lib/runtime.mjs",
     "scripts/lib/secret-scan.mjs",
+    "scripts/lib/staged-tree.mjs",
     "scripts/lib/terminal.mjs",
     "scripts/lib/ui.mjs",
     "scripts/lib/vows.mjs",

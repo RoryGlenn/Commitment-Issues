@@ -266,6 +266,13 @@ silent and exits successfully while the local package is absent, so it cannot
 break the next normal or production install. Reinstall the development
 dependency, then run `uninstall` to remove the remaining owned setup safely.
 
+If project logic was appended after the generated repair, uninstall refuses
+before removing anything and prints the exact manual step. Remove only the
+displaced Commitment Issues repair command, retain every project-owned command,
+then rerun uninstall. Exact generated terminal compositions—including
+semicolon, single-`&`, multiline, and trailing-whitespace forms—are removed
+automatically and restore the original `prepare` bytes.
+
 ## Why is Node.js 22.11.0 the minimum?
 
 Node.js 22.11.0 is the first Node 22 LTS release and the minimum exercised by

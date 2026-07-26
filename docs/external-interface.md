@@ -207,6 +207,24 @@ package-manager runners, or the network. Rerunning `init` migrates an exact
 legacy direct `commitment-issues doctor --quiet` command or suffix to this
 guarded form.
 
+Composition is ownership-preserving rather than a raw string suffix. An
+ordinary command becomes `<project> && <repair>`; a terminal `<project>;`
+becomes `<project> && <repair>;`; and a terminal `<project> &` becomes
+`<project> & <repair>`. Trailing whitespace remains trailing, quoted operators
+remain data, and multiline commands retain their earlier lines. `uninstall`
+recognizes those exact terminal forms and restores the original project bytes.
+
+The analyzer refuses incomplete terminal operators (`&&`, `||`, `|`, or
+`;;`), unfinished quotes or escapes, a trailing shell comment, unbalanced
+parentheses, and heredoc or here-string redirection. A current or historical
+repair command is owned only when it is the one exact top-level command in a
+generated terminal position. If it is duplicated, followed by more project
+logic, or moved into shell control flow, `init` and `uninstall` stop before
+changing any file or hook, and `doctor` never reports the composition healthy.
+The printed remediation asks the user to remove only the displaced repair while
+retaining all project-owned commands. Quoted examples and argument-only
+mentions do not establish ownership.
+
 ## Setup removed by `uninstall`
 
 `uninstall` removes only setup it can identify safely:
@@ -230,7 +248,10 @@ their position does not make them healthy, and `init` and `doctor` still
 require the dispatcher form first. It removes an exact current guarded prepare
 command or suffix, and continues to recognize the legacy direct
 `doctor --quiet --integration=<manager>` form, because that package script is
-generated package state.
+generated package state. It also removes the exact historically malformed
+`; && <repair>` or `& && <repair>` suffix while restoring the preceding
+project command. A displaced or repeated repair is ambiguous and blocks the
+entire uninstall before any setup is removed.
 
 Hook ownership checks do not follow symbolic links. A hook-file symlink,
 dangling symlink, or symlink used as the hooks directory is preserved as

@@ -29,6 +29,7 @@ import {
   isHuskyHooksPath,
   inspectHookManager,
   inspectHookManagerRunner,
+  inspectPrepareRepairScript,
   legacyHuskyDirectoryState,
   leftoverHuskyHooks,
   writeHook,
@@ -176,6 +177,42 @@ if (!gitState.inside) {
         : "Run this from inside your git project.",
     ),
   ]);
+}
+
+let prepareState = null;
+try {
+  const manifest = JSON.parse(fs.readFileSync("package.json", "utf8"));
+  prepareState = inspectPrepareRepairScript(manifest?.scripts?.prepare);
+} catch {
+  // Existing configuration diagnostics own malformed package.json reporting.
+}
+if (["ambiguous", "invalid"].includes(prepareState?.status)) {
+  const ambiguous = prepareState.status === "ambiguous";
+  if (quiet) {
+    quietWarning(
+      `commitment-issues: package.json scripts.prepare has ${ambiguous ? "an ambiguous" : "a broken"} repair composition — edit it safely, then run \`${runScript("init")}\`.`,
+    );
+    process.exit(0);
+  }
+  finishBox(
+    "error",
+    [
+      pc.bold(
+        ambiguous
+          ? "The install-time repair is ambiguous."
+          : "The install-time repair is not healthy.",
+      ),
+      "",
+      pc.dim(`${escapeTerminalText(prepareState.reason)}.`),
+      pc.dim(
+        ambiguous
+          ? "Remove only the displaced Commitment Issues repair command from scripts.prepare and keep every project-owned command."
+          : `Run ${escapeTerminalText(runScript("init"))} to rewrite the exact generated repair safely.`,
+      ),
+      pc.dim("No hooks were changed."),
+    ],
+    1,
+  );
 }
 
 const managerDetection = detectHookManagers();

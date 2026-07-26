@@ -24,6 +24,16 @@ output examples, see the repository's
 
 Nothing is copied into your repo from the package source. The hooks are plain `.git/hooks` files that call the installed `commitment-issues` bin — no hook manager is involved.
 
+Before changing any project file or hook, `init` conservatively checks an
+existing `prepare` command. Terminal semicolons, single `&` operators, trailing
+whitespace, quoted operators, and multiline commands are composed without
+losing the original bytes; `uninstall` restores those bytes exactly.
+Unfinished operators, quotes, escapes, comments, or parentheses are left for
+the user to complete, and heredoc or here-string redirection is left unchanged
+for manual composition. A recognized repair command that was duplicated,
+moved into shell control flow, or otherwise moved away from its generated
+terminal position is also left untouched with exact manual-cleanup guidance.
+
 ### Existing hook-manager mode
 
 `init --integration=<manager>` keeps Husky, Lefthook, or pre-commit as hook

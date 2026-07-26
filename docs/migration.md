@@ -243,6 +243,14 @@ package-first removal, leaves that guard silent and successful; it never falls
 through to `npx`, a global binary, or the network. Reinstall the package before
 running `uninstall` when the generated setup also needs removal.
 
+Current `init` also repairs the exact invalid `; && <repair>` and
+`& && <repair>` suffixes produced when an older initializer appended repair
+after a trailing separator. If project logic now follows that repair, or more
+than one recognized repair is present, ownership is ambiguous: `init`,
+`doctor`, and `uninstall` leave all files and hooks untouched and print manual
+cleanup guidance. Keep the project commands, remove only the displaced repair,
+then rerun the intended command.
+
 ## Downgrades and manual rollback
 
 In-place downgrades are unsupported. An older release cannot safely reverse

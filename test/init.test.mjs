@@ -1815,6 +1815,176 @@ test("init preserves an unrelated prepare and appends repair", (t) => {
   assert.match(`${second.stdout}${second.stderr}`, /Already configured/);
 });
 
+test("init composes safe prepare separators, whitespace, quotes, and lines", (t) => {
+  const repair = prepareRepairCommand();
+  const fixtures = [
+    {
+      project: "node --version;",
+      expected: `node --version && ${repair};`,
+      executeOnPosix: true,
+    },
+    {
+      project: "node --version &",
+      expected: `node --version & ${repair}`,
+    },
+    {
+      project: "node --version \t\n",
+      expected: `node --version && ${repair} \t\n`,
+    },
+    {
+      project: "node --version;\r\n",
+      expected: `node --version && ${repair};\r\n`,
+    },
+    {
+      project: `node -e "console.log('; && | &')"`,
+      expected: `node -e "console.log('; && | &')" && ${repair}`,
+    },
+    {
+      project: "node --version;\nnode --version\n",
+      expected: `node --version;\nnode --version && ${repair}\n`,
+    },
+  ];
+
+  for (const fixture of fixtures) {
+    const tempDir = createTempRepo();
+    t.after(() => cleanupTempRepo(tempDir));
+    writePackage(tempDir, {
+      name: "prepare-composition",
+      version: "1.0.0",
+      scripts: { prepare: fixture.project },
+    });
+
+    if (fixture.executeOnPosix && process.platform !== "win32") {
+      const original = run("npm", ["run", "prepare"], tempDir);
+      assert.equal(original.status, 0, original.stderr);
+    }
+
+    const result = runInit(tempDir);
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+    assert.equal(readPackage(tempDir).scripts.prepare, fixture.expected);
+
+    if (fixture.executeOnPosix && process.platform !== "win32") {
+      const composed = run("npm", ["run", "prepare"], tempDir);
+      assert.equal(composed.status, 0, composed.stderr);
+    }
+
+    const second = runInit(tempDir);
+    assert.equal(second.status, 0, `${second.stdout}${second.stderr}`);
+    assert.equal(readPackage(tempDir).scripts.prepare, fixture.expected);
+    assert.match(`${second.stdout}${second.stderr}`, /Already configured/);
+  }
+});
+
+test("init refuses incomplete prepare syntax before changing project state", (t) => {
+  for (const prepare of [
+    "node --version &&",
+    "node --version ||",
+    "node --version |",
+    'node -e "unterminated',
+    "node --version \\",
+    "node --version # trailing comment",
+    "cat <<EOF\ncontent\nEOF",
+  ]) {
+    const tempDir = createTempRepo();
+    t.after(() => cleanupTempRepo(tempDir));
+    writePackage(tempDir, {
+      name: "unsafe-prepare-composition",
+      version: "1.0.0",
+      scripts: { prepare },
+    });
+    const beforePackage = readFile(tempDir, "package.json");
+    const beforeIgnore = readFile(tempDir, ".gitignore");
+
+    const result = runInit(tempDir);
+    const output = `${result.stdout}${result.stderr}`;
+    assert.equal(result.status, 1, prepare);
+    assert.match(output, /Unsafe package\.json prepare composition/);
+    assert.match(output, /Make scripts\.prepare one complete command/);
+    assert.match(output, /No files or hooks were changed/);
+    assert.equal(readFile(tempDir, "package.json"), beforePackage);
+    assert.equal(readFile(tempDir, ".gitignore"), beforeIgnore);
+    assert.equal(fs.existsSync(gitHook(tempDir, "pre-commit")), false);
+    assert.equal(fs.existsSync(gitHook(tempDir, "pre-push")), false);
+  }
+});
+
+test("init repairs its historical broken suffix but refuses a displaced repair", (t) => {
+  const repair = prepareRepairCommand();
+  const historicalDir = createTempRepo();
+  const historicalBackgroundDir = createTempRepo();
+  const displacedDir = createTempRepo();
+  t.after(() => cleanupTempRepo(historicalDir));
+  t.after(() => cleanupTempRepo(historicalBackgroundDir));
+  t.after(() => cleanupTempRepo(displacedDir));
+
+  writePackage(historicalDir, {
+    name: "historical-prepare-composition",
+    version: "1.0.0",
+    scripts: { prepare: `node --version; && ${repair}` },
+  });
+  const repaired = runInit(historicalDir);
+  assert.equal(repaired.status, 0, `${repaired.stdout}${repaired.stderr}`);
+  assert.equal(
+    readPackage(historicalDir).scripts.prepare,
+    `node --version && ${repair};`,
+  );
+
+  writePackage(historicalBackgroundDir, {
+    name: "historical-background-prepare-composition",
+    version: "1.0.0",
+    scripts: { prepare: `node --version & && ${repair}` },
+  });
+  const backgroundRepaired = runInit(historicalBackgroundDir);
+  assert.equal(
+    backgroundRepaired.status,
+    0,
+    `${backgroundRepaired.stdout}${backgroundRepaired.stderr}`,
+  );
+  assert.equal(
+    readPackage(historicalBackgroundDir).scripts.prepare,
+    `node --version & ${repair}`,
+  );
+
+  writePackage(displacedDir, {
+    name: "displaced-prepare-composition",
+    version: "1.0.0",
+    scripts: {
+      prepare: `node --version && ${repair} && node --version`,
+    },
+  });
+  const beforePackage = readFile(displacedDir, "package.json");
+  const beforeIgnore = readFile(displacedDir, ".gitignore");
+  const refused = runInit(displacedDir);
+  const output = `${refused.stdout}${refused.stderr}`;
+  assert.equal(refused.status, 1);
+  assert.match(output, /Ambiguous package\.json prepare repair/);
+  assert.match(output, /Remove only the displaced Commitment Issues repair/);
+  assert.match(output, /No files or hooks were changed/);
+  assert.equal(readFile(displacedDir, "package.json"), beforePackage);
+  assert.equal(readFile(displacedDir, ".gitignore"), beforeIgnore);
+  assert.equal(fs.existsSync(gitHook(displacedDir, "pre-commit")), false);
+  assert.equal(fs.existsSync(gitHook(displacedDir, "pre-push")), false);
+
+  const controlFlowDir = createTempRepo();
+  t.after(() => cleanupTempRepo(controlFlowDir));
+  writePackage(controlFlowDir, {
+    name: "control-flow-prepare-composition",
+    version: "1.0.0",
+    scripts: {
+      prepare: `if node --version; then ${repair}; fi`,
+    },
+  });
+  const controlFlowPackage = readFile(controlFlowDir, "package.json");
+  const controlFlowRefused = runInit(controlFlowDir);
+  const controlFlowOutput = `${controlFlowRefused.stdout}${controlFlowRefused.stderr}`;
+  assert.equal(controlFlowRefused.status, 1);
+  assert.match(controlFlowOutput, /Ambiguous package\.json prepare repair/);
+  assert.match(controlFlowOutput, /No files or hooks were changed/);
+  assert.equal(readFile(controlFlowDir, "package.json"), controlFlowPackage);
+  assert.equal(fs.existsSync(gitHook(controlFlowDir, "pre-commit")), false);
+  assert.equal(fs.existsSync(gitHook(controlFlowDir, "pre-push")), false);
+});
+
 test("init preserves postprepare while composing repair into prepare", (t) => {
   const tempDir = createTempRepo();
   t.after(() => cleanupTempRepo(tempDir));

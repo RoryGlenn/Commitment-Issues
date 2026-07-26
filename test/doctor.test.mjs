@@ -28,7 +28,11 @@ import {
   lefthookRunner,
   preCommitRunner,
 } from "./helpers/hook-manager-fixtures.mjs";
-import { hookInvocation, hookManagerSnippets } from "../scripts/lib/hooks.mjs";
+import {
+  hookInvocation,
+  hookManagerSnippets,
+  prepareRepairCommand,
+} from "../scripts/lib/hooks.mjs";
 
 function runDoctor(tempDir, args = [], options = {}) {
   return run(
@@ -93,6 +97,24 @@ test("doctor rejects unknown options before repairing hooks", (t) => {
   assert.equal(result.status, 1);
   assert.match(output, /Unknown doctor option: --quite/);
   assert.match(output, /No hooks were changed/);
+  assert.equal(fs.existsSync(gitHook(tempDir, "pre-commit")), false);
+  assert.equal(fs.existsSync(gitHook(tempDir, "pre-push")), false);
+});
+
+test("doctor refuses a repository descendant before repairing hooks", (t) => {
+  const tempDir = createTempRepo();
+  const descendant = path.join(tempDir, "src");
+  t.after(() => cleanupTempRepo(tempDir));
+
+  const result = run(
+    "node",
+    [path.join(tempDir, "scripts", "doctor.mjs")],
+    descendant,
+  );
+  const output = `${result.stdout}${result.stderr}`;
+  assert.equal(result.status, 1);
+  assert.match(output, /Project root required/);
+  assert.match(output, /Doctor only inspects and repairs from a worktree root/);
   assert.equal(fs.existsSync(gitHook(tempDir, "pre-commit")), false);
   assert.equal(fs.existsSync(gitHook(tempDir, "pre-push")), false);
 });
@@ -1361,6 +1383,73 @@ test("doctor --quiet stays silent when the wiring is healthy", (t) => {
 
   assert.equal(result.status, 0);
   assert.equal(`${result.stdout}${result.stderr}`.trim(), "");
+});
+
+test("doctor refuses to call a broken or displaced prepare repair healthy", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  assert.equal(runDoctor(tempDir).status, 0);
+  const commitHook = readFile(tempDir, ".git/hooks/pre-commit");
+  const pushHook = readFile(tempDir, ".git/hooks/pre-push");
+  const repair = prepareRepairCommand();
+  const pkg = JSON.parse(readFile(tempDir, "package.json"));
+
+  pkg.scripts.prepare = `node --version; && ${repair}`;
+  writeFile(
+    path.join(tempDir, "package.json"),
+    `${JSON.stringify(pkg, null, 2)}\n`,
+  );
+  const broken = runDoctor(tempDir);
+  const brokenOutput = `${broken.stdout}${broken.stderr}`;
+  assert.equal(broken.status, 1);
+  assert.match(brokenOutput, /install-time repair is not healthy/i);
+  assert.match(brokenOutput, /Run .* init to rewrite/);
+  assert.match(brokenOutput, /No hooks were changed/);
+  assert.doesNotMatch(brokenOutput, /Git hooks are healthy/);
+
+  const quiet = runDoctor(tempDir, ["--quiet"]);
+  const quietOutput = `${quiet.stdout}${quiet.stderr}`.trim();
+  assert.equal(quiet.status, 0);
+  assert.match(quietOutput, /broken repair composition/);
+  assert.equal(quietOutput.split(/\r?\n/u).length, 1);
+
+  pkg.scripts.prepare = `node --version && ${repair} && node --version`;
+  writeFile(
+    path.join(tempDir, "package.json"),
+    `${JSON.stringify(pkg, null, 2)}\n`,
+  );
+  const ambiguous = runDoctor(tempDir);
+  const ambiguousOutput = `${ambiguous.stdout}${ambiguous.stderr}`;
+  assert.equal(ambiguous.status, 1);
+  assert.match(ambiguousOutput, /install-time repair is ambiguous/i);
+  assert.match(
+    ambiguousOutput,
+    /Remove only the displaced Commitment Issues repair/,
+  );
+  assert.doesNotMatch(ambiguousOutput, /Git hooks are healthy/);
+  const ambiguousQuiet = runDoctor(tempDir, ["--quiet"]);
+  const ambiguousQuietOutput =
+    `${ambiguousQuiet.stdout}${ambiguousQuiet.stderr}`.trim();
+  assert.equal(ambiguousQuiet.status, 0);
+  assert.match(ambiguousQuietOutput, /ambiguous repair composition/);
+  assert.equal(ambiguousQuietOutput.split(/\r?\n/u).length, 1);
+  assert.equal(readFile(tempDir, ".git/hooks/pre-commit"), commitHook);
+  assert.equal(readFile(tempDir, ".git/hooks/pre-push"), pushHook);
+});
+
+test("doctor leaves prepare ownership to existing invalid-package diagnostics", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  assert.equal(runDoctor(tempDir).status, 0);
+  writeFile(path.join(tempDir, "package.json"), "{ invalid json\n");
+
+  const result = runDoctor(tempDir);
+  const output = `${result.stdout}${result.stderr}`;
+  assert.equal(result.status, 0);
+  assert.match(output, /Configuration needs attention/);
+  assert.match(output, /package\.json contains/);
+  assert.match(output, /invalid JSON/);
+  assert.match(output, /Git hooks are healthy/);
 });
 
 test("doctor warns about malformed standalone config without blocking repair", (t) => {

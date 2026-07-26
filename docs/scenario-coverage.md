@@ -325,6 +325,12 @@ production-readiness workstream #130 is consolidated in the
   gitignore paths are replaced only inside the repository, preserving external
   aliases. Unit/subprocess:
   `test/lib-files.test.mjs`, `test/init.test.mjs`.
+- **INIT-037** — prepare repair composition preserves terminal semicolons,
+  single `&` operators, whitespace, quotes, and multiline project commands;
+  refuses incomplete syntax plus heredoc redirection; and treats a recognized
+  repair inside shell control flow or outside its exact generated terminal
+  position as ambiguous before project or hook mutation. Unit/fixture:
+  `test/hooks.test.mjs`, `test/init.test.mjs`.
 
 ## Uninstall
 
@@ -732,6 +738,13 @@ production-readiness workstream #130 is consolidated in the
   `survive production install and direct dependency removal` in
   `test/integration/helpers/lifecycle-fixture.mjs`; CI lifecycle matrix:
   `.github/workflows/ci.yml`.
+- **LIFE-010** — init composes a project-owned `prepare` across terminal
+  semicolons, single `&` operators, trailing whitespace, quoting, and multiline
+  commands; uninstall restores the original bytes. Exact historical malformed
+  suffixes are repairable/removable, while incomplete syntax and displaced or
+  duplicate repairs make init, doctor, and uninstall refuse mutation.
+  Unit/subprocess: `test/hooks.test.mjs`, `test/init.test.mjs`,
+  `test/doctor.test.mjs`, and `test/uninstall.test.mjs`.
 
 ### Package managers
 

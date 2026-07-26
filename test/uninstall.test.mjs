@@ -511,6 +511,105 @@ test("uninstall removes an appended prepare repair and preserves prepare", (t) =
   assert.match(output, /package\.json prepare repair/);
 });
 
+test("uninstall restores project prepare separators and whitespace exactly", (t) => {
+  for (const prepare of [
+    "node --version;",
+    "node --version &\t",
+    "node --version \t\n",
+    "node --version;\r\n",
+    `node -e "console.log('; && | &')"`,
+    "node --version;\nnode --version\n",
+  ]) {
+    const tempDir = createTempRepo();
+    t.after(() => cleanupTempRepo(tempDir));
+    writePackage(tempDir, {
+      name: "prepare-cleanup",
+      version: "1.0.0",
+      scripts: { prepare },
+    });
+
+    const initialized = runScript(tempDir, "init");
+    assert.equal(
+      initialized.status,
+      0,
+      `${initialized.stdout}${initialized.stderr}`,
+    );
+    assert.notEqual(readPackage(tempDir).scripts.prepare, prepare);
+
+    const result = runScript(tempDir, "uninstall");
+    const output = `${result.stdout}${result.stderr}`;
+    assert.equal(result.status, 0, output);
+    assert.equal(readPackage(tempDir).scripts.prepare, prepare);
+    assert.match(output, /package\.json prepare repair/);
+  }
+
+  const historicalDir = createTempRepo();
+  t.after(() => cleanupTempRepo(historicalDir));
+  writePackage(historicalDir, {
+    name: "historical-prepare-cleanup",
+    version: "1.0.0",
+    scripts: {
+      prepare: `node --version; && ${prepareRepairCommand()}`,
+    },
+  });
+  const historical = runScript(historicalDir, "uninstall");
+  assert.equal(
+    historical.status,
+    0,
+    `${historical.stdout}${historical.stderr}`,
+  );
+  assert.equal(readPackage(historicalDir).scripts.prepare, "node --version;");
+
+  const historicalBackgroundDir = createTempRepo();
+  t.after(() => cleanupTempRepo(historicalBackgroundDir));
+  writePackage(historicalBackgroundDir, {
+    name: "historical-background-prepare-cleanup",
+    version: "1.0.0",
+    scripts: {
+      prepare: `node --version & && ${prepareRepairCommand()}`,
+    },
+  });
+  const historicalBackground = runScript(historicalBackgroundDir, "uninstall");
+  assert.equal(
+    historicalBackground.status,
+    0,
+    `${historicalBackground.stdout}${historicalBackground.stderr}`,
+  );
+  assert.equal(
+    readPackage(historicalBackgroundDir).scripts.prepare,
+    "node --version &",
+  );
+});
+
+test("uninstall refuses a displaced prepare repair before removing setup", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  writePackage(tempDir, {
+    name: "displaced-prepare-cleanup",
+    version: "1.0.0",
+    scripts: { prepare: "node --version" },
+  });
+  assert.equal(runScript(tempDir, "init").status, 0);
+
+  const pkg = readPackage(tempDir);
+  pkg.scripts.prepare += " && node --version";
+  writePackage(tempDir, pkg);
+  const beforePackage = readFile(tempDir, "package.json");
+  const beforeCommitHook = readFile(tempDir, ".git/hooks/pre-commit");
+  const beforePushHook = readFile(tempDir, ".git/hooks/pre-push");
+
+  const result = runScript(tempDir, "uninstall");
+  const output = `${result.stdout}${result.stderr}`;
+  assert.equal(result.status, 1);
+  assert.match(output, /Ambiguous package\.json prepare repair/);
+  assert.match(output, /Remove only the displaced Commitment Issues repair/);
+  assert.match(output, /No files or hooks were changed/);
+  assert.doesNotMatch(output, /setup was removed/i);
+  assert.equal(readFile(tempDir, "package.json"), beforePackage);
+  assert.equal(readFile(tempDir, ".git/hooks/pre-commit"), beforeCommitHook);
+  assert.equal(readFile(tempDir, ".git/hooks/pre-push"), beforePushHook);
+});
+
 test("uninstall preserves customized scripts and hooks", (t) => {
   const tempDir = createTempRepo();
   t.after(() => cleanupTempRepo(tempDir));

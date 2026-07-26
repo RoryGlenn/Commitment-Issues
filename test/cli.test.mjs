@@ -681,14 +681,66 @@ test("cli rejects arguments outside each command contract", (t) => {
   }
 });
 
-test("cli runs from a project subdirectory", (t) => {
+test("cli precommit uses root config and staged paths from a subdirectory", (t) => {
   const tempDir = createTempRepo();
   t.after(() => cleanupTempRepo(tempDir));
-  const nested = path.join(tempDir, "nested", "deeper");
+  const branch = run(
+    "git",
+    ["branch", "--show-current"],
+    tempDir,
+  ).stdout.trim();
+  setPrecommitConfig(tempDir, {
+    blockProtectedBranches: true,
+    protectedBranches: [branch],
+    requireTests: false,
+  });
+  writeFile(
+    path.join(tempDir, "src", "needs formatting.json"),
+    '{"nested":true}\n',
+  );
+  run("git", ["add", "src/needs formatting.json"], tempDir);
+  const nested = path.join(tempDir, "nested path", "deeper");
   fs.mkdirSync(nested, { recursive: true });
 
-  const result = cli(tempDir, ["precommit"], { cwd: nested });
-  assert.equal(result.status, 0);
+  const blocked = cli(tempDir, ["precommit"], { cwd: nested });
+  const blockedOutput = combinedOutput(blocked);
+
+  assert.equal(blocked.status, 1);
+  assert.match(blockedOutput, /protected branch/i);
+
+  setPrecommitConfig(tempDir, {
+    protectedBranches: [],
+    requireTests: false,
+  });
+  const checked = cli(tempDir, ["precommit"], { cwd: nested });
+  const checkedOutput = combinedOutput(checked);
+
+  assert.equal(checked.status, 0);
+  assert.match(checkedOutput, /1 file with formatting issues/);
+  assert.match(checkedOutput, /src\/needs formatting\.json/);
+  assert.doesNotMatch(checkedOutput, /Prettier failed to complete/);
+});
+
+test("setup commands refuse a repository subdirectory without changes", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const nested = path.join(tempDir, "nested package");
+  fs.mkdirSync(nested);
+  const packagePath = path.join(nested, "package.json");
+  const original = '{"name":"nested-package","private":true}\n';
+  fs.writeFileSync(packagePath, original);
+
+  for (const args of [
+    ["init", "--dry-run"],
+    ["doctor"],
+    ["uninstall", "--dry-run"],
+  ]) {
+    const result = cli(tempDir, args, { cwd: nested });
+    assert.equal(result.status, 1, args.join(" "));
+    assert.match(combinedOutput(result), /Project root required/);
+    assert.match(combinedOutput(result), /Run this command from:/);
+  }
+  assert.equal(fs.readFileSync(packagePath, "utf8"), original);
 });
 
 test("cli help works outside a git repo and node project", (t) => {

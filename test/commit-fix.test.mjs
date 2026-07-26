@@ -30,11 +30,12 @@ import {
 } from "./helpers/temp-repo.mjs";
 
 function runCommitFix(tempDir, options = {}) {
+  const { cwd = tempDir, ...runOptions } = options;
   return run(
     "node",
     [path.join(tempDir, "scripts", "commit-fix.mjs")],
-    tempDir,
-    options,
+    cwd,
+    runOptions,
   );
 }
 
@@ -218,6 +219,24 @@ test("amends the latest commit when all fixes are automatic", (t) => {
   assert.equal(result.status, 0);
   assert.match(output, /Latest commit amended with automatic fixes\./);
   assert.equal(readHeadFile(tempDir, "src/amend.json"), '{ "alpha": 1 }\n');
+});
+
+test("commit-fix resolves committed root paths from a subdirectory", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  writeFile(path.join(tempDir, "src", "nested-amend.json"), '{"alpha":1}\n');
+  run("git", ["add", "src/nested-amend.json"], tempDir);
+  run("git", ["commit", "-m", "nested amend"], tempDir);
+  const nested = path.join(tempDir, "nested path", "deeper");
+  fs.mkdirSync(nested, { recursive: true });
+
+  const result = runCommitFix(tempDir, { cwd: nested });
+
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  assert.equal(
+    readHeadFile(tempDir, "src/nested-amend.json"),
+    '{ "alpha": 1 }\n',
+  );
 });
 
 test("commit-fix breaks a target hardlink without changing external bytes", (t) => {

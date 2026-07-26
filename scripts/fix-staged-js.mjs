@@ -1,11 +1,19 @@
 // Copyright (c) 2026 RoryGlenn and commitment-issues contributors
 // SPDX-License-Identifier: MIT
 
-import { runTool } from "./lib/process.mjs";
+import path from "node:path";
+import { enterWorktreeRoot, isWorktreeRoot, runTool } from "./lib/process.mjs";
 import { devInstallCommand } from "./lib/package-manager.mjs";
 import { escapeTerminalText } from "./lib/terminal.mjs";
 
-const files = process.argv.slice(2).filter(Boolean);
+const invocationCwd = process.cwd();
+const worktreeRoot = enterWorktreeRoot();
+const invokedFromRoot =
+  !worktreeRoot || isWorktreeRoot(invocationCwd, worktreeRoot);
+const files = process.argv
+  .slice(2)
+  .filter(Boolean)
+  .map((file) => (invokedFromRoot ? file : path.resolve(invocationCwd, file)));
 
 if (files.length === 0) {
   process.exit(0);

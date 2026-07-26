@@ -18,8 +18,11 @@ import {
   interruptedToolOutcome,
   localToolInvocation,
 } from "./lib/local-tool.mjs";
-import { run, spawnAsync } from "./lib/process.mjs";
+import { enterWorktreeRoot, run, spawnAsync } from "./lib/process.mjs";
 import { escapeTerminalText } from "./lib/terminal.mjs";
+
+const invocationCwd = process.cwd();
+enterWorktreeRoot();
 const config = loadPrecommitConfig();
 const hookOutput = resolveHookOutput(config);
 for (const message of precommitConfigWarningMessages(config)) {
@@ -105,7 +108,10 @@ if (messageArgument === "--git-path") {
 }
 let absoluteMessageFile;
 try {
-  absoluteMessageFile = path.resolve(messageFile);
+  absoluteMessageFile = path.resolve(
+    messageArgument === "--git-path" ? process.cwd() : invocationCwd,
+    messageFile,
+  );
   if (!fs.statSync(absoluteMessageFile).isFile()) {
     finish("unreadable", [`Not a file: ${messageFile}`]);
   }

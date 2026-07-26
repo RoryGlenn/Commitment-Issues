@@ -6,7 +6,13 @@ import fs from "node:fs";
 import path from "node:path";
 import pc from "picocolors";
 import { printBoxModel } from "./lib/ui.mjs";
-import { run, isPackageInstalled, isToolInstalled } from "./lib/process.mjs";
+import {
+  isPackageInstalled,
+  isToolInstalled,
+  isWorktreeRoot,
+  resolveWorktreeRoot,
+  run,
+} from "./lib/process.mjs";
 import {
   BIN,
   HOOK_MANAGERS,
@@ -139,6 +145,16 @@ function repairFailed(lines) {
     process.exit(0);
   }
   finishBox("error", lines, 1);
+}
+
+const worktreeRoot = resolveWorktreeRoot();
+if (worktreeRoot && !isWorktreeRoot(process.cwd(), worktreeRoot)) {
+  notApplicable([
+    pc.bold("Project root required."),
+    "",
+    pc.dim("Doctor only inspects and repairs from a worktree root."),
+    pc.dim(`Run this command from: ${escapeTerminalText(worktreeRoot)}`),
+  ]);
 }
 
 if (!fs.existsSync("package.json")) {

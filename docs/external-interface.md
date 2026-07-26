@@ -88,9 +88,18 @@ Supported integration values are exactly `husky`, `lefthook`, and
 `pre-commit`. A value is required when automatic detection finds zero or more
 than one owner. Repeating the integration option is an error.
 
-Setup and hook-health commands expect the project root of a non-bare Git
-working tree. Bare repositories do not run this package's local commit or push
-workflow and are not reported as having active hooks.
+Runtime checks and fixes (`precommit`, `prepush`, `panic`, `commit-msg`,
+`fix-staged`, `commit-fix`, and `fix-staged-js`) may run from the owning
+worktree root or any descendant. They resolve that root before reading
+configuration, interpreting Git-reported paths, finding project-local tools, or
+launching children. Nested repositories, submodules, and linked worktrees use
+their own Git-reported roots. A relative `commit-msg <message-file>` argument
+still resolves from the directory where the command was invoked.
+
+Setup and hook-health commands (`init`, `doctor`, and `uninstall`) remain
+explicitly root-only and refuse a worktree descendant before changing or
+repairing anything. Bare repositories do not run this package's local commit
+or push workflow and are not reported as having active hooks.
 
 Detached HEAD intentionally has no protected branch identity, so the
 protected-branch guard does not fire in that state. File, secret, size,

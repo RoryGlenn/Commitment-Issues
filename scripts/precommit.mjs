@@ -8,8 +8,9 @@ import {
   nodeTestArgumentParts,
   runBatchedCommand,
   runToolBatches,
-  TOOL_TIMEOUT_MS,
+  enterWorktreeRoot,
   run,
+  toolTimeoutMs,
   withoutGitLocalEnvironment,
 } from "./lib/process.mjs";
 import {
@@ -82,6 +83,8 @@ import {
   parseNulPaths,
 } from "./lib/files.mjs";
 
+enterWorktreeRoot();
+const TOOL_TIMEOUT_MS = toolTimeoutMs();
 const GIT_PATH_ARGS = ["-c", "core.quotePath=false"];
 // The whole-index probe keeps argv fixed-size for Windows while allowing far
 // more output than Node's roughly 1 MiB spawnSync default. The explicit ceiling

@@ -220,7 +220,11 @@ production-readiness workstream #130 is consolidated in the
 - **CLI-011** — `fix-staged` dispatches through the bin. Subprocess: `test/cli.test.mjs`.
 - **CLI-012** — `fix-staged-js` dispatches through the bin. Subprocess: `test/cli.test.mjs`.
 - **CLI-013** — command runs from project root. Subprocess: `test/cli.test.mjs` and other fixture tests.
-- **CLI-014** — command runs from a subdirectory. Subprocess: `test/cli.test.mjs`.
+- **CLI-014** — runtime commands resolve root config, Git paths, tools, and
+  child cwd from a subdirectory; root-only setup commands refuse before
+  mutation. Subprocess: `test/cli.test.mjs`, `test/prepush.test.mjs`,
+  `test/commit-msg.test.mjs`, `test/fix-staged.test.mjs`,
+  `test/commit-fix.test.mjs`, `test/panic.test.mjs`.
 - **CLI-015** — CLI help and subcommand error reporting work outside a Git repo / Node project. Subprocess: `test/cli.test.mjs`.
 - **CLI-016** — shell-sensitive command tokens are not shell-expanded by the CLI wrapper. Subprocess: `test/cli.test.mjs`.
 - **CLI-017** — `uninstall` dispatches through the bin. Subprocess: `test/cli.test.mjs`.

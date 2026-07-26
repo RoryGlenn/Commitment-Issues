@@ -31,12 +31,24 @@ import {
   readStandalonePrecommitConfig,
   STANDALONE_CONFIG_FILE,
 } from "./lib/config.mjs";
+import { isWorktreeRoot, resolveWorktreeRoot } from "./lib/process.mjs";
 import { escapeTerminalText } from "./lib/terminal.mjs";
 
 // Remove only setup that commitment-issues can identify as its own. Exact
 // generated scripts and hook bodies are safe to delete; customized scripts,
 // custom hooks, dependencies, lockfiles, and shared .gitignore entries are
 // deliberately preserved.
+
+const worktreeRoot = resolveWorktreeRoot();
+if (worktreeRoot && !isWorktreeRoot(process.cwd(), worktreeRoot)) {
+  errorBox([
+    pc.bold("Project root required."),
+    "",
+    pc.dim("Uninstall only changes files and hooks from a worktree root."),
+    pc.dim(`Run this command from: ${escapeTerminalText(worktreeRoot)}`),
+  ]);
+  process.exit(1);
+}
 
 const args = process.argv.slice(2);
 const unknownOption = args.find(

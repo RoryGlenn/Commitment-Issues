@@ -32,7 +32,7 @@ import {
   resolvePrecommitConfigSources,
   STANDALONE_CONFIG_FILE,
 } from "./lib/config.mjs";
-import { run } from "./lib/process.mjs";
+import { isWorktreeRoot, resolveWorktreeRoot, run } from "./lib/process.mjs";
 import { logoLines } from "./lib/logo.mjs";
 import { escapeTerminalText } from "./lib/terminal.mjs";
 import {
@@ -46,6 +46,17 @@ import {
 // `.git/hooks` files running the installed `commitment-issues` bin — no hook
 // manager, nothing vendored. Also migrates husky-era wiring from pre-3.0
 // setups. Safe to re-run.
+
+const worktreeRoot = resolveWorktreeRoot();
+if (worktreeRoot && !isWorktreeRoot(process.cwd(), worktreeRoot)) {
+  errorBox([
+    pc.bold("Project root required."),
+    "",
+    pc.dim("Init only changes files and hooks from a worktree root."),
+    pc.dim(`Run this command from: ${escapeTerminalText(worktreeRoot)}`),
+  ]);
+  process.exit(1);
+}
 
 const packageFileState = inspectMutableProjectFile("package.json");
 if (packageFileState.status === "missing") {

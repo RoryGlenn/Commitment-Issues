@@ -3,7 +3,7 @@
 
 import pc from "picocolors";
 import { errorBox, infoBox, successBox, warningBox } from "./lib/ui.mjs";
-import { run, spawnAsync } from "./lib/process.mjs";
+import { enterWorktreeRoot, run, spawnAsync } from "./lib/process.mjs";
 import { devInstallCommand, runScript } from "./lib/package-manager.mjs";
 import { escapeTerminalText } from "./lib/terminal.mjs";
 import {
@@ -26,6 +26,7 @@ import {
   buildConcurrentFixRefusalMessage,
 } from "./lib/message.mjs";
 
+enterWorktreeRoot();
 const GIT_PATH_ARGS = ["-c", "core.quotePath=false"];
 const tone = loadPrecommitConfig().tone;
 

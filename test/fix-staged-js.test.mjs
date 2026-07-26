@@ -4,20 +4,24 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {
   cleanupTempRepo,
   createTempRepo,
   readFile,
+  repoRoot,
   run,
   writeFile,
 } from "./helpers/temp-repo.mjs";
 
-function runFixStagedJs(tempDir, files) {
+function runFixStagedJs(tempDir, files, options = {}) {
+  const { cwd = tempDir, ...runOptions } = options;
   return run(
     "node",
     [path.join(tempDir, "scripts", "fix-staged-js.mjs"), ...files],
-    tempDir,
+    cwd,
+    runOptions,
   );
 }
 
@@ -58,11 +62,30 @@ test("formats a TypeScript file and exits 0 when auto-fixable", (t) => {
   assert.equal(readFile(tempDir, "src/fixme.ts"), "export const x = 1;\n");
 });
 
-test("exits 0 immediately when given no file arguments", (t) => {
+test("preserves caller-relative file arguments below the root", (t) => {
   const tempDir = createTempRepo();
   t.after(() => cleanupTempRepo(tempDir));
+  const nested = path.join(tempDir, "nested path");
+  writeFile(path.join(nested, "fixme.js"), "export const x=1;\n");
 
-  const result = runFixStagedJs(tempDir, []);
+  const result = runFixStagedJs(tempDir, ["fixme.js"], { cwd: nested });
+
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  assert.equal(
+    readFile(tempDir, "nested path/fixme.js"),
+    "export const x = 1;\n",
+  );
+});
+
+test("exits 0 immediately outside Git when given no file arguments", (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "fix-staged-js-"));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+
+  const result = run(
+    "node",
+    [path.join(repoRoot, "scripts", "fix-staged-js.mjs")],
+    tempDir,
+  );
 
   assert.equal(result.status, 0);
   assert.equal(`${result.stdout}${result.stderr}`.trim(), "");

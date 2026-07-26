@@ -12,13 +12,16 @@ import { MAX_TIMEOUT_MS } from "../scripts/lib/config.mjs";
 import {
   batchProcessArguments,
   createProcessInterruptionManager,
+  DEFAULT_TOOL_TIMEOUT_MS,
   detachedForPlatform,
   estimatedProcessArgumentUnits,
   isNodeTestCommand,
+  isWorktreeRoot,
   nodeTestArgumentParts,
   nodeTestArguments,
   POSIX_ARGUMENT_BUDGET_BYTES,
   processArgumentBudget,
+  resolveWorktreeRoot,
   run,
   runBatchedCommand,
   toolInvocation,
@@ -29,9 +32,171 @@ import {
   isPackageInstalled,
   isToolInstalled,
   terminateProcessTree,
+  toolTimeoutMs,
   WINDOWS_ARGUMENT_BUDGET_UNITS,
   withoutGitLocalEnvironment,
 } from "../scripts/lib/process.mjs";
+import {
+  cleanupTempRepo,
+  createTempRepo,
+  fakeGitEnv,
+} from "./helpers/temp-repo.mjs";
+
+test("worktree root resolution follows cwd instead of inherited Git routing", (t) => {
+  const tempDir = createTempRepo();
+  const routedDir = createTempRepo();
+  const bareDir = fs.mkdtempSync(path.join(os.tmpdir(), "bare-root-"));
+  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "outside-root-"));
+  t.after(() => {
+    cleanupTempRepo(tempDir);
+    cleanupTempRepo(routedDir);
+    fs.rmSync(bareDir, { recursive: true, force: true });
+    fs.rmSync(outsideDir, { recursive: true, force: true });
+  });
+  const nested = path.join(tempDir, "nested path", "deeper");
+  fs.mkdirSync(nested, { recursive: true });
+  const routedEnvironment = {
+    ...process.env,
+    GIT_DIR: path.join(routedDir, ".git"),
+    GIT_WORK_TREE: routedDir,
+    GIT_INDEX_FILE: path.join(routedDir, ".git", "index"),
+  };
+
+  assert.equal(
+    fs.realpathSync.native(resolveWorktreeRoot(nested, routedEnvironment)),
+    fs.realpathSync.native(tempDir),
+  );
+
+  const inner = path.join(nested, "inner repository");
+  fs.mkdirSync(inner);
+  assert.equal(run("git", ["init"], { cwd: inner }).status, 0);
+  assert.equal(
+    fs.realpathSync.native(resolveWorktreeRoot(inner)),
+    fs.realpathSync.native(inner),
+  );
+
+  assert.equal(run("git", ["init", "--bare"], { cwd: bareDir }).status, 0);
+  assert.equal(resolveWorktreeRoot(bareDir), null);
+  assert.equal(resolveWorktreeRoot(outsideDir), null);
+});
+
+test("worktree root resolution accepts Git path record endings defensively", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+
+  for (const output of [".\r\n", "."]) {
+    const environment = fakeGitEnv(
+      tempDir,
+      "rev-parse --show-toplevel",
+      0,
+      output,
+    );
+    assert.equal(resolveWorktreeRoot(tempDir, environment), tempDir);
+  }
+  for (const output of ["", "\0"]) {
+    const environment = fakeGitEnv(
+      tempDir,
+      "rev-parse --show-toplevel",
+      0,
+      output,
+    );
+    assert.equal(resolveWorktreeRoot(tempDir, environment), null);
+  }
+});
+
+test("worktree root identity accepts alternate filesystem spellings", (t) => {
+  const tempDir = createTempRepo();
+  const aliasRoot = fs.mkdtempSync(path.join(os.tmpdir(), "root-alias-"));
+  const alias = path.join(aliasRoot, "repository alias");
+  fs.symlinkSync(
+    tempDir,
+    alias,
+    process.platform === "win32" ? "junction" : "dir",
+  );
+  const nested = path.join(tempDir, "nested");
+  fs.mkdirSync(nested);
+  t.after(() => {
+    fs.rmSync(aliasRoot, { recursive: true, force: true });
+    cleanupTempRepo(tempDir);
+  });
+
+  assert.equal(isWorktreeRoot(alias, tempDir), true);
+  assert.equal(isWorktreeRoot(nested, tempDir), false);
+  assert.equal(isWorktreeRoot(tempDir, null), false);
+
+  const disappeared = path.join(tempDir, "disappeared");
+  assert.equal(isWorktreeRoot(disappeared, disappeared), true);
+  assert.equal(isWorktreeRoot(disappeared, tempDir), false);
+});
+
+test("worktree root resolution supports linked worktrees and submodules", (t) => {
+  const primary = createTempRepo();
+  const host = createTempRepo();
+  const source = createTempRepo();
+  const linked = `${primary} linked worktree`;
+  t.after(() => {
+    run("git", ["worktree", "remove", "--force", linked], { cwd: primary });
+    fs.rmSync(linked, { recursive: true, force: true });
+    cleanupTempRepo(primary);
+    cleanupTempRepo(host);
+    cleanupTempRepo(source);
+  });
+
+  const addedWorktree = run(
+    "git",
+    ["worktree", "add", "-b", "root-resolution-linked", linked],
+    { cwd: primary },
+  );
+  assert.equal(
+    addedWorktree.status,
+    0,
+    `${addedWorktree.stdout}${addedWorktree.stderr}`,
+  );
+  assert.equal(
+    fs.realpathSync.native(resolveWorktreeRoot(linked)),
+    fs.realpathSync.native(linked),
+  );
+
+  const submodulePath = path.join("vendor", "child module");
+  const addedSubmodule = run(
+    "git",
+    [
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "add",
+      source,
+      submodulePath,
+    ],
+    { cwd: host },
+  );
+  assert.equal(
+    addedSubmodule.status,
+    0,
+    `${addedSubmodule.stdout}${addedSubmodule.stderr}`,
+  );
+  const submodule = path.join(host, submodulePath);
+  assert.equal(
+    fs.realpathSync.native(resolveWorktreeRoot(submodule)),
+    fs.realpathSync.native(submodule),
+  );
+});
+
+test("tool timeouts are loaded lazily from the selected root", (t) => {
+  const configured = fs.mkdtempSync(path.join(os.tmpdir(), "timeout-root-"));
+  const fallback = fs.mkdtempSync(path.join(os.tmpdir(), "timeout-fallback-"));
+  t.after(() => {
+    fs.rmSync(configured, { recursive: true, force: true });
+    fs.rmSync(fallback, { recursive: true, force: true });
+  });
+  fs.writeFileSync(
+    path.join(configured, "package.json"),
+    '{"precommitChecks":{"timeoutMs":4321}}\n',
+  );
+
+  assert.equal(toolTimeoutMs(configured), 4321);
+  assert.equal(toolTimeoutMs(fallback), DEFAULT_TOOL_TIMEOUT_MS);
+});
 
 test("Node test arguments separate configured options from hostile paths", () => {
   assert.equal(isNodeTestCommand([process.execPath, "--test"]), true);

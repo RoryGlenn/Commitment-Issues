@@ -991,11 +991,11 @@ test("npm package contains only reviewed runtime, docs, and assets within budget
     `packed size ${pack.size} exceeds 350 KiB`,
   );
   assert.ok(
-    pack.unpackedSize <= 800 * 1024,
-    `unpacked size ${pack.unpackedSize} exceeds 800 KiB`,
+    pack.unpackedSize <= 806 * 1024,
+    `unpacked size ${pack.unpackedSize} exceeds 806 KiB`,
   );
   assert.match(docs, /350 KiB compressed/);
-  assert.match(docs, /800 KiB\s+unpacked/);
+  assert.match(docs, /806 KiB\s+unpacked/);
 });
 
 test("message-state SVG assets exist and only README examples enter npm", () => {

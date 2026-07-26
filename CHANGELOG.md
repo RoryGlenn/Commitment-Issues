@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Runtime checks, fixers, `panic`, and direct commit-message checks now resolve
+  the owning Git worktree before loading root configuration, interpreting
+  Git-reported paths, finding local tools, or launching child processes.
+  Commands behave consistently from repository descendants, nested
+  repositories, submodules, and linked worktrees; setup, doctor, and uninstall
+  now refuse descendant directories explicitly while recognizing alternate
+  filesystem spellings of the root, including Windows short paths.
 - Parent `SIGINT`, `SIGTERM`, and `SIGHUP` now terminate active attached tool
   trees before signal-appropriate exit. Timeouts share this cleanup, and a
   bounded fallback releases pipes held by unreclaimable escaped descendants.

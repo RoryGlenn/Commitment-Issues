@@ -19,11 +19,12 @@ import {
 } from "./helpers/temp-repo.mjs";
 
 function runCommitMsg(tempDir, args = [], options = {}) {
+  const { cwd = tempDir, ...runOptions } = options;
   return run(
     "node",
     [path.join(tempDir, "scripts", "commit-msg.mjs"), ...args],
-    tempDir,
-    options,
+    cwd,
+    runOptions,
   );
 }
 
@@ -135,6 +136,32 @@ process.exit(result.status == null ? 1 : result.status);
   }
   return binDir;
 }
+
+test("direct commit-msg uses root config and tools below the root", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  setPrecommitConfig(tempDir, {
+    commitMessage: { enabled: true, blockOnFailure: true },
+  });
+  installFakeCommitlint(tempDir);
+  const nested = path.join(tempDir, "nested path");
+  const message = path.join(nested, "COMMIT_EDITMSG");
+  const log = path.join(tempDir, "nested-commitlint.log");
+  writeFile(message, "fix: keep nested invocation rooted\n");
+
+  const result = runCommitMsg(tempDir, ["COMMIT_EDITMSG"], {
+    cwd: nested,
+    env: { ...process.env, FAKE_COMMITLINT_LOG: log },
+  });
+
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  const [args] = fs
+    .readFileSync(log, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(args.slice(-2), ["--edit", fs.realpathSync(message)]);
+});
 
 function installStaticGitPathHook(tempDir) {
   const hookPath = path.join(tempDir, ".git", "hooks", "commit-msg");

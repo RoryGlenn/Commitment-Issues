@@ -535,8 +535,8 @@ test("prepush uses root config, paths, and child cwd from a subdirectory", (t) =
 
   assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
   assert.equal(
-    fs.realpathSync(path.resolve(readFile(tempDir, "prepush-cwd.txt"))),
-    fs.realpathSync(tempDir),
+    fs.realpathSync.native(path.resolve(readFile(tempDir, "prepush-cwd.txt"))),
+    fs.realpathSync.native(tempDir),
   );
 });
 

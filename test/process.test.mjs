@@ -63,16 +63,16 @@ test("worktree root resolution follows cwd instead of inherited Git routing", (t
   };
 
   assert.equal(
-    fs.realpathSync(resolveWorktreeRoot(nested, routedEnvironment)),
-    fs.realpathSync(tempDir),
+    fs.realpathSync.native(resolveWorktreeRoot(nested, routedEnvironment)),
+    fs.realpathSync.native(tempDir),
   );
 
   const inner = path.join(nested, "inner repository");
   fs.mkdirSync(inner);
   assert.equal(run("git", ["init"], { cwd: inner }).status, 0);
   assert.equal(
-    fs.realpathSync(resolveWorktreeRoot(inner)),
-    fs.realpathSync(inner),
+    fs.realpathSync.native(resolveWorktreeRoot(inner)),
+    fs.realpathSync.native(inner),
   );
 
   assert.equal(run("git", ["init", "--bare"], { cwd: bareDir }).status, 0);
@@ -153,8 +153,8 @@ test("worktree root resolution supports linked worktrees and submodules", (t) =>
     `${addedWorktree.stdout}${addedWorktree.stderr}`,
   );
   assert.equal(
-    fs.realpathSync(resolveWorktreeRoot(linked)),
-    fs.realpathSync(linked),
+    fs.realpathSync.native(resolveWorktreeRoot(linked)),
+    fs.realpathSync.native(linked),
   );
 
   const submodulePath = path.join("vendor", "child module");
@@ -177,8 +177,8 @@ test("worktree root resolution supports linked worktrees and submodules", (t) =>
   );
   const submodule = path.join(host, submodulePath);
   assert.equal(
-    fs.realpathSync(resolveWorktreeRoot(submodule)),
-    fs.realpathSync(submodule),
+    fs.realpathSync.native(resolveWorktreeRoot(submodule)),
+    fs.realpathSync.native(submodule),
   );
 });
 

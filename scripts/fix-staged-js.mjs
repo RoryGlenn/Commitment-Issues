@@ -2,18 +2,18 @@
 // SPDX-License-Identifier: MIT
 
 import path from "node:path";
-import { enterWorktreeRoot, runTool } from "./lib/process.mjs";
+import { enterWorktreeRoot, isWorktreeRoot, runTool } from "./lib/process.mjs";
 import { devInstallCommand } from "./lib/package-manager.mjs";
 import { escapeTerminalText } from "./lib/terminal.mjs";
 
 const invocationCwd = process.cwd();
-enterWorktreeRoot();
+const worktreeRoot = enterWorktreeRoot();
+const invokedFromRoot =
+  !worktreeRoot || isWorktreeRoot(invocationCwd, worktreeRoot);
 const files = process.argv
   .slice(2)
   .filter(Boolean)
-  .map((file) =>
-    invocationCwd === process.cwd() ? file : path.resolve(invocationCwd, file),
-  );
+  .map((file) => (invokedFromRoot ? file : path.resolve(invocationCwd, file)));
 
 if (files.length === 0) {
   process.exit(0);

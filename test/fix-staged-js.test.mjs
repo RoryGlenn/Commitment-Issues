@@ -4,11 +4,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {
   cleanupTempRepo,
   createTempRepo,
   readFile,
+  repoRoot,
   run,
   writeFile,
 } from "./helpers/temp-repo.mjs";
@@ -75,11 +77,15 @@ test("preserves caller-relative file arguments below the root", (t) => {
   );
 });
 
-test("exits 0 immediately when given no file arguments", (t) => {
-  const tempDir = createTempRepo();
-  t.after(() => cleanupTempRepo(tempDir));
+test("exits 0 immediately outside Git when given no file arguments", (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "fix-staged-js-"));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
 
-  const result = runFixStagedJs(tempDir, []);
+  const result = run(
+    "node",
+    [path.join(repoRoot, "scripts", "fix-staged-js.mjs")],
+    tempDir,
+  );
 
   assert.equal(result.status, 0);
   assert.equal(`${result.stdout}${result.stderr}`.trim(), "");

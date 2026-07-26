@@ -12,6 +12,7 @@ import {
   parseBlobBatch,
   parseTreeEntries,
   stagedTreePatch,
+  temporaryRootParent,
 } from "../scripts/lib/staged-tree.mjs";
 import {
   cleanupTempRepo,
@@ -66,7 +67,10 @@ function captureFile(t, name = "src/snapshot.mjs", content = "export {};\n") {
 }
 
 function assertDependencyLink(source, target) {
-  assert.equal(fs.realpathSync.native(target), fs.realpathSync.native(source));
+  assert.deepEqual(
+    fs.readdirSync(target).sort(),
+    fs.readdirSync(source).sort(),
+  );
 }
 
 test("parses exact staged-tree and blob batch records", () => {
@@ -162,10 +166,6 @@ test("captures and materializes one immutable future commit tree", (t) => {
   assert.equal(
     fs.readFileSync(path.join(tempDir, "src", "snapshot.mjs"), "utf8"),
     worktree,
-  );
-  assertDependencyLink(
-    path.join(tempDir, "node_modules"),
-    path.join(root, "node_modules"),
   );
   assert.equal(materializeStagedTree(snapshot), root);
 });
@@ -456,6 +456,8 @@ test("materialization wraps unexpected filesystem failures", (t) => {
 test("dependency links cover root and nested package installations", (t) => {
   const tempDir = createTempRepo();
   t.after(() => cleanupTempRepo(tempDir));
+  run("git", ["rm", "--cached", "node_modules"], tempDir);
+  run("git", ["commit", "-m", "untrack dependency fixture"], tempDir);
   writeFile(
     path.join(tempDir, "packages", "child", "package.json"),
     '{"name":"child"}\n',
@@ -463,6 +465,10 @@ test("dependency links cover root and nested package installations", (t) => {
   fs.mkdirSync(path.join(tempDir, "packages", "child", "node_modules"), {
     recursive: true,
   });
+  writeFile(
+    path.join(tempDir, "packages", "child", "node_modules", "fixture.txt"),
+    "fixture\n",
+  );
   run("git", ["add", "packages/child/package.json"], tempDir);
   const snapshot = captureStagedTree({ cwd: tempDir });
   t.after(() => snapshot.cleanup());
@@ -475,6 +481,50 @@ test("dependency links cover root and nested package installations", (t) => {
   assertDependencyLink(
     path.join(tempDir, "packages", "child", "node_modules"),
     path.join(root, "packages", "child", "node_modules"),
+  );
+});
+
+test("dependency snapshots share a filesystem without Git metadata", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  assert.equal(
+    path.basename(temporaryRootParent(tempDir, { temporaryDirectories: [] })),
+    ".git",
+  );
+  const externalRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), "staged-tree-dependencies-"),
+  );
+  t.after(() => fs.rmSync(externalRoot, { force: true, recursive: true }));
+  const externalDependencies = path.join(externalRoot, "node_modules");
+  writeFile(path.join(externalDependencies, "fixture.txt"), "fixture\n");
+  fs.unlinkSync(path.join(tempDir, "node_modules"));
+  fs.symlinkSync(
+    externalDependencies,
+    path.join(tempDir, "node_modules"),
+    process.platform === "win32" ? "junction" : "dir",
+  );
+  assert.equal(
+    fs.realpathSync.native(
+      temporaryRootParent(tempDir, { temporaryDirectories: [] }),
+    ),
+    fs.realpathSync.native(externalRoot),
+  );
+  assert.equal(
+    temporaryRootParent(tempDir, {
+      temporaryDirectories: [path.join(externalRoot, "missing"), externalRoot],
+    }),
+    fs.realpathSync.native(externalRoot),
+  );
+  writeFile(path.join(tempDir, "src", "snapshot.mjs"), "export {};\n");
+  run("git", ["add", "src/snapshot.mjs"], tempDir);
+
+  const snapshot = captureStagedTree({ cwd: tempDir });
+  t.after(() => snapshot.cleanup());
+  const root = materializeStagedTree(snapshot);
+
+  assert.equal(
+    fs.readFileSync(path.join(root, "src", "snapshot.mjs"), "utf8"),
+    "export {};\n",
   );
 });
 
@@ -492,12 +542,10 @@ test("dependency linking skips non-directory installations and occupied targets"
     assert.equal(fs.existsSync(path.join(root, "node_modules")), false);
   });
 
-  await t.test("occupied target", (t) => {
-    const { snapshot, tempDir } = captureFile(t);
+  await t.test("occupied tracked target", (t) => {
+    const { snapshot } = captureFile(t);
     const root = materializeStagedTree(snapshot);
-    assertDependencyLink(
-      path.join(tempDir, "node_modules"),
-      path.join(root, "node_modules"),
-    );
+    assert.equal(fs.existsSync(path.join(root, "node_modules")), true);
+    assert.equal(run("git", ["status", "--short"], root).stdout, "");
   });
 });

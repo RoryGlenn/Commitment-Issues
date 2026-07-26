@@ -252,6 +252,47 @@ function assertCapturedState(snapshot) {
   }
 }
 
+function filesystemIdentity(file) {
+  const resolved = fs.realpathSync.native(file);
+  return `${path.parse(resolved).root.toLowerCase()}:${fs.statSync(resolved).dev}`;
+}
+
+export function temporaryRootParent(
+  projectRoot,
+  {
+    temporaryDirectories = [process.env.RUNNER_TEMP, os.tmpdir()].filter(
+      Boolean,
+    ),
+  } = {},
+) {
+  const dependencies = path.join(projectRoot, "node_modules");
+  if (
+    !fs.existsSync(dependencies) ||
+    !fs.statSync(dependencies).isDirectory()
+  ) {
+    return os.tmpdir();
+  }
+  const resolvedDependencies = fs.realpathSync.native(dependencies);
+  const dependencyFilesystem = filesystemIdentity(resolvedDependencies);
+  const compatibleTemporaryDirectory = temporaryDirectories.find(
+    (candidate) =>
+      fs.existsSync(candidate) &&
+      filesystemIdentity(candidate) === dependencyFilesystem,
+  );
+  if (compatibleTemporaryDirectory) {
+    return fs.realpathSync.native(compatibleTemporaryDirectory);
+  }
+  // Windows hosted runners can place os.tmpdir() and the checkout on different
+  // volumes, where a dependency junction is not traversable. Git metadata is
+  // the final same-filesystem fallback and keeps the disposable tree out of the
+  // worktree whenever this is an ordinary clone.
+  const dependencyParent = path.dirname(resolvedDependencies);
+  const metadata = path.join(dependencyParent, ".git");
+  return fs.existsSync(metadata) && fs.statSync(metadata).isDirectory()
+    ? metadata
+    : dependencyParent;
+}
+
 /**
  * Capture one immutable tree from an exact copy of the active index. No Git
  * command receives the live index, so inspection cannot rewrite user state.
@@ -261,7 +302,10 @@ function assertCapturedState(snapshot) {
 export function captureStagedTree({ cwd = process.cwd() } = {}) {
   const projectRoot = path.resolve(cwd);
   const temporaryRoot = fs.mkdtempSync(
-    path.join(os.tmpdir(), "commitment-issues-staged-tree-"),
+    path.join(
+      temporaryRootParent(projectRoot),
+      ".commitment-issues-staged-tree-",
+    ),
   );
   try {
     const index = captureIndex(projectRoot);

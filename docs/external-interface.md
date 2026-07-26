@@ -408,7 +408,9 @@ materializes raw blobs without checkout filters or line-ending conversion, and
 runs its test command inside an isolated disposable repository whose `HEAD` and
 index both name that tree. Blob contents are streamed in bounded batches;
 Windows uses Git's permission-independent `core.symlinks=false` representation
-for symbolic-link entries. Unstaged and untracked project files are absent.
+for symbolic-link entries and keeps the disposable tree on the installed
+dependency filesystem so local-tool junctions remain traversable. Unstaged and
+untracked project files are absent.
 Pre-push still discovers the current checkout from its working directory.
 Nested Git fixtures in either flow cannot be redirected into the hook caller by
 an inherited `GIT_DIR`, work tree, or index path.

@@ -12,6 +12,15 @@ import {
 import { run, runTool, toolTimeoutMs } from "./process.mjs";
 
 const GIT_PATH_ARGS = ["-c", "core.quotePath=false"];
+const GIT_OPERATION_MARKERS = [
+  "rebase-apply/applying",
+  "rebase-apply",
+  "rebase-merge",
+  "MERGE_HEAD",
+  "CHERRY_PICK_HEAD",
+  "REVERT_HEAD",
+  "sequencer",
+];
 const REGULAR_INDEX_MODES = new Set(["100644", "100755"]);
 const FIX_TOOL_CONCURRENCY = 4;
 const FIX_TOOL_INTERRUPTION_OUTCOMES = new Set([
@@ -37,6 +46,58 @@ function changedError(message, cause) {
 
 function applyError(message, cause) {
   return fixError("ERR_FIX_APPLY", message, cause);
+}
+
+/**
+ * Inspect worktree-specific Git operation markers without following marker
+ * symlinks. Any existing entry is active; an unreadable marker fails closed.
+ * @returns {{operation: "git am"|"rebase"|"merge"|"cherry-pick"|"revert"|"sequencer"|null, markers: string[]}} State.
+ */
+export function inspectGitOperationState() {
+  const active = new Set();
+  for (const marker of GIT_OPERATION_MARKERS) {
+    const result = run("git", ["rev-parse", "--git-path", marker]);
+    if (result.error || result.status !== 0) {
+      throw inspectionError(
+        `Unable to locate Git operation marker ${marker}.`,
+        result.error,
+      );
+    }
+    const markerPath = result.stdout.replace(/\r?\n$/u, "");
+    if (!markerPath || markerPath.includes("\0")) {
+      throw inspectionError(
+        `Git returned an invalid operation marker path for ${marker}.`,
+      );
+    }
+    try {
+      fs.lstatSync(path.resolve(markerPath));
+      active.add(marker);
+    } catch (error) {
+      if (error?.code !== "ENOENT") {
+        throw inspectionError(
+          `Unable to inspect Git operation marker ${marker}.`,
+          error,
+        );
+      }
+    }
+  }
+
+  let operation = null;
+  if (active.has("rebase-apply/applying")) {
+    operation = "git am";
+  } else if (active.has("rebase-apply") || active.has("rebase-merge")) {
+    operation = "rebase";
+  } else if (active.has("MERGE_HEAD")) {
+    operation = "merge";
+  } else if (active.has("CHERRY_PICK_HEAD")) {
+    operation = "cherry-pick";
+  } else if (active.has("REVERT_HEAD")) {
+    operation = "revert";
+  } else if (active.has("sequencer")) {
+    operation = "sequencer";
+  }
+
+  return { operation, markers: [...active] };
 }
 
 function requireSuccessful(result, message) {

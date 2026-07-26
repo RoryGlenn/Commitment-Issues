@@ -88,6 +88,76 @@ export function buildConcurrentFixRefusalMessage({
 }
 
 /**
+ * Build a refusal when commit-fix finds or cannot inspect a Git operation.
+ * @param {{operation?: string|null, tone?: string, rerunCommand: string}} options - Operation and presentation context.
+ * @returns {{severity: "error", lines: string[]}} Box model.
+ */
+export function buildCommitFixOperationRefusalMessage({
+  operation,
+  tone = "standard",
+  rerunCommand,
+}) {
+  const fun = normalizeTone(tone) === "fun";
+  if (!operation) {
+    return {
+      severity: "error",
+      lines: [
+        pc.bold(
+          fun
+            ? "Git would not explain its relationship status."
+            : "Unable to inspect active Git operations.",
+        ),
+        "",
+        pc.dim(
+          fun
+            ? "Without a clear answer about active operations, this fixer is staying out of it."
+            : "The command refuses to run until Git can verify that no merge,",
+        ),
+        ...(fun
+          ? []
+          : [
+              pc.dim(
+                "cherry-pick, revert, rebase, git am, or sequencer state is active.",
+              ),
+            ]),
+        pc.dim("No fixer tools ran, and repository state was left unchanged."),
+      ],
+    };
+  }
+
+  return {
+    severity: "error",
+    lines: [
+      pc.bold(
+        fun
+          ? "Git is already in a complicated relationship."
+          : "Cannot amend during an active Git operation.",
+      ),
+      "",
+      pc.dim(
+        fun
+          ? `${operation} is still in progress.`
+          : `Git reports active ${operation} state.`,
+      ),
+      pc.dim(
+        fun
+          ? "Finish that conversation with Git before fixing this commit:"
+          : "Finish or abort it with Git before running this command again:",
+      ),
+      "",
+      `  ${pc.bold(escapeTerminalText(rerunCommand))}`,
+      "",
+      pc.dim(
+        fun
+          ? "No fixer tools ran. The existing operation was left exactly where it was."
+          : "No fixer tools ran. Files, the index, history, and operation state",
+      ),
+      ...(fun ? [] : [pc.dim("were left unchanged.")]),
+    ],
+  };
+}
+
+/**
  * Build a refusal for commit history that cannot be amended safely.
  * @param {{reason: "detached"|"inspection"|"retained"|"signed", tone?: string, references?: string[], rerunCommand?: string}} options - History state and presentation context.
  * @returns {{severity: "error", lines: string[]}} Box model.

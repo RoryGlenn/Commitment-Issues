@@ -8,6 +8,7 @@ import {
   appendPushWarnings,
   buildAdvisoryMessage,
   buildCommitFixHistoryRefusalMessage,
+  buildCommitFixOperationRefusalMessage,
   buildCommitMessageCheckMessage,
   buildConcurrentFixRefusalMessage,
   buildPushAllowedMessage,
@@ -18,8 +19,7 @@ import {
 } from "../scripts/lib/message.mjs";
 import { stripAnsi } from "./helpers/output.mjs";
 
-// picocolors emits plain text when stdout is not a TTY (as under `node --test`),
-// so these assertions can match the message content directly.
+// Normalize color styling before assertions that match across wrapped lines.
 
 test("success when there are no issues", () => {
   const { severity, lines } = buildAdvisoryMessage([]);
@@ -78,6 +78,30 @@ test("commit-fix history refusals explain each fail-closed state", () => {
     /a tag or remote-tracking ref/,
   );
   assert.match(unavailable.lines.join("\n"), /safe to amend/);
+});
+
+test("commit-fix operation refusals distinguish active and unreadable state", () => {
+  const active = buildCommitFixOperationRefusalMessage({
+    operation: "revert",
+    rerunCommand: "pnpm run commit:fix",
+  });
+  const unreadable = buildCommitFixOperationRefusalMessage({
+    rerunCommand: "npm run commit:fix",
+  });
+  const activeText = stripAnsi(active.lines.join("\n"));
+  const unreadableText = stripAnsi(unreadable.lines.join("\n"));
+
+  assert.equal(active.severity, "error");
+  assert.match(activeText, /active Git operation/);
+  assert.match(activeText, /active revert state/);
+  assert.match(activeText, /pnpm run commit:fix/);
+  assert.match(activeText, /operation state\s+were left unchanged/);
+  assert.match(unreadableText, /inspect active Git operations/);
+  assert.match(
+    unreadableText,
+    /merge,\s+cherry-pick, revert, rebase, git am, or sequencer state/,
+  );
+  assert.match(unreadableText, /repository state was left unchanged/);
 });
 
 test("advisory input normalization accepts omitted and legacy context shapes", () => {

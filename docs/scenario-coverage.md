@@ -462,6 +462,15 @@ production-readiness workstream #130 is consolidated in the
   the amended commit receives the fixed bytes. Two selected paths sharing one
   inode are refused before either path or `HEAD` changes. Fixture:
   `test/commit-fix.test.mjs`.
+- **CFIX-016** — active `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`,
+  `rebase-apply`, `rebase-merge`, `git am`, and multi-command `sequencer`
+  states refuse before fixer mutation, including a clean-index empty revert.
+  Exact operation files, `HEAD`, index, and worktree bytes remain unchanged;
+  the real sequencer continues afterward. Uninspectable marker paths fail
+  closed, mid-fixer operation starts are revalidated, and standard/fun messages
+  are covered. Fixture: `test/commit-fix.test.mjs`; unit:
+  `test/fix-safety.test.mjs`, `test/message.test.mjs`,
+  `test/fun-tone.test.mjs`.
 
 ### Staged fixes
 

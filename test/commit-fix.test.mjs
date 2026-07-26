@@ -28,6 +28,7 @@ import {
   writeCrossPlatformShim,
   writeFile,
 } from "./helpers/temp-repo.mjs";
+import { stripAnsi } from "./helpers/output.mjs";
 
 function runCommitFix(tempDir, options = {}) {
   const { cwd = tempDir, ...runOptions } = options;
@@ -86,6 +87,80 @@ function commitFixableJson(tempDir, name, message) {
   const committed = run("git", ["commit", "-m", message], tempDir);
   assert.equal(committed.status, 0, committed.stderr);
   return file;
+}
+
+function gitPath(tempDir, name) {
+  const result = run("git", ["rev-parse", "--git-path", name], tempDir);
+  assert.equal(result.status, 0, result.stderr);
+  return path.resolve(tempDir, result.stdout.replace(/\r?\n$/u, ""));
+}
+
+function snapshotPath(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return { type: "missing" };
+  }
+  const stats = fs.lstatSync(filePath);
+  if (stats.isDirectory()) {
+    return {
+      type: "directory",
+      entries: fs
+        .readdirSync(filePath)
+        .sort()
+        .map((entry) => [entry, snapshotPath(path.join(filePath, entry))]),
+    };
+  }
+  if (stats.isSymbolicLink()) {
+    return { type: "symlink", target: fs.readlinkSync(filePath) };
+  }
+  return {
+    type: stats.isFile() ? "file" : "other",
+    mode: stats.mode,
+    content: stats.isFile()
+      ? fs.readFileSync(filePath).toString("base64")
+      : null,
+  };
+}
+
+function captureRefusalState(tempDir, operationMarkers) {
+  const head = run("git", ["rev-parse", "HEAD"], tempDir);
+  const files = run(
+    "git",
+    ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+    tempDir,
+  );
+  assert.equal(head.status, 0, head.stderr);
+  assert.equal(files.status, 0, files.stderr);
+  const worktree = Object.fromEntries(
+    [...new Set(files.stdout.split("\0").filter(Boolean))]
+      .sort()
+      .map((file) => [
+        file,
+        snapshotPath(path.join(tempDir, ...file.split("/"))),
+      ]),
+  );
+  const operations = Object.fromEntries(
+    operationMarkers.map((marker) => [
+      marker,
+      snapshotPath(gitPath(tempDir, marker)),
+    ]),
+  );
+  return {
+    head: head.stdout.trim(),
+    index: fs.readFileSync(gitPath(tempDir, "index")).toString("base64"),
+    operations,
+    worktree,
+  };
+}
+
+function createOperationFixture(tempDir, marker, kind) {
+  const markerPath = gitPath(tempDir, marker);
+  if (kind === "directory") {
+    fs.mkdirSync(markerPath, { recursive: true });
+    writeFile(path.join(markerPath, "state"), `${marker} state\n`);
+  } else {
+    const head = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+    writeFile(markerPath, `${head}\n`);
+  }
 }
 
 function addSyntheticSignatureHeader(tempDir, header) {
@@ -332,6 +407,175 @@ test("errors when there is no commit to inspect", (t) => {
 
   assert.equal(result.status, 1);
   assert.match(output, /Unable to inspect the latest commit\./);
+});
+
+test("refuses every active Git operation before fixer mutation", () => {
+  const fixtures = [
+    {
+      marker: "MERGE_HEAD",
+      snapshotMarker: "MERGE_HEAD",
+      kind: "file",
+      operation: "merge",
+    },
+    {
+      marker: "CHERRY_PICK_HEAD",
+      snapshotMarker: "CHERRY_PICK_HEAD",
+      kind: "file",
+      operation: "cherry-pick",
+    },
+    {
+      marker: "REVERT_HEAD",
+      snapshotMarker: "REVERT_HEAD",
+      kind: "file",
+      operation: "revert",
+    },
+    {
+      marker: "rebase-apply",
+      snapshotMarker: "rebase-apply",
+      kind: "directory",
+      operation: "rebase",
+    },
+    {
+      marker: "rebase-merge",
+      snapshotMarker: "rebase-merge",
+      kind: "directory",
+      operation: "rebase",
+    },
+    {
+      marker: "rebase-apply/applying",
+      snapshotMarker: "rebase-apply",
+      kind: "file",
+      operation: "git am",
+    },
+    {
+      marker: "sequencer",
+      snapshotMarker: "sequencer",
+      kind: "directory",
+      operation: "sequencer",
+    },
+  ];
+
+  for (const fixture of fixtures) {
+    const tempDir = createTempRepo();
+    try {
+      commitFixableJson(
+        tempDir,
+        `operation-${fixture.operation.replaceAll(" ", "-")}`,
+        `${fixture.operation} operation`,
+      );
+      createOperationFixture(tempDir, fixture.marker, fixture.kind);
+      const before = captureRefusalState(tempDir, [fixture.snapshotMarker]);
+
+      const result = runCommitFix(tempDir);
+      const output = `${result.stdout}${result.stderr}`;
+
+      assert.equal(result.status, 1, fixture.marker);
+      assert.match(output, /Cannot amend during an active Git operation\./);
+      assert.match(
+        output,
+        new RegExp(`active ${fixture.operation} state`, "u"),
+      );
+      assert.match(output, /No fixer tools ran/);
+      assert.deepEqual(
+        captureRefusalState(tempDir, [fixture.snapshotMarker]),
+        before,
+        fixture.marker,
+      );
+    } finally {
+      cleanupTempRepo(tempDir);
+    }
+  }
+});
+
+test("refuses an empty multi-command revert and preserves continuation", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const file = "src/revert-sequence.json";
+  writeFile(path.join(tempDir, "src", "revert-sequence.json"), '{"step":1}\n');
+  run("git", ["add", file], tempDir);
+  const first = run("git", ["commit", "-m", "first sequence change"], tempDir);
+  assert.equal(first.status, 0, first.stderr);
+  const firstCommit = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+
+  writeFile(path.join(tempDir, "src", "revert-sequence.json"), '{"step":2}\n');
+  run("git", ["add", file], tempDir);
+  const second = run(
+    "git",
+    ["commit", "-m", "second sequence change"],
+    tempDir,
+  );
+  assert.equal(second.status, 0, second.stderr);
+  const secondCommit = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+
+  const started = run(
+    "git",
+    ["revert", "--no-edit", firstCommit, secondCommit],
+    tempDir,
+  );
+  assert.notEqual(started.status, 0);
+  assert.equal(fs.existsSync(gitPath(tempDir, "REVERT_HEAD")), true);
+  assert.equal(fs.existsSync(gitPath(tempDir, "sequencer")), true);
+
+  const ours = run("git", ["checkout", "--ours", "--", file], tempDir);
+  assert.equal(ours.status, 0, ours.stderr);
+  run("git", ["add", "--", file], tempDir);
+  assert.equal(
+    run("git", ["diff", "--cached", "--quiet", "HEAD"], tempDir).status,
+    0,
+  );
+  assert.equal(run("git", ["diff", "--quiet"], tempDir).status, 0);
+  const before = captureRefusalState(tempDir, [
+    "REVERT_HEAD",
+    "sequencer",
+    "MERGE_MSG",
+  ]);
+
+  const result = runCommitFix(tempDir);
+
+  assert.equal(result.status, 1, `${result.stdout}${result.stderr}`);
+  assert.match(`${result.stdout}${result.stderr}`, /active revert state/);
+  assert.deepEqual(
+    captureRefusalState(tempDir, ["REVERT_HEAD", "sequencer", "MERGE_MSG"]),
+    before,
+  );
+
+  const continued = run("git", ["revert", "--skip"], tempDir);
+  assert.equal(continued.status, 0, continued.stderr);
+  assert.equal(fs.existsSync(gitPath(tempDir, "REVERT_HEAD")), false);
+  assert.equal(fs.existsSync(gitPath(tempDir, "sequencer")), false);
+});
+
+test("active-operation refusals honor fun tone", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  setPrecommitConfig(tempDir, { tone: "fun" });
+  run("git", ["add", "package.json"], tempDir);
+  commitFixableJson(tempDir, "fun-operation", "fun operation");
+  createOperationFixture(tempDir, "MERGE_HEAD", "file");
+
+  const result = runCommitFix(tempDir);
+  const output = stripAnsi(`${result.stdout}${result.stderr}`);
+
+  assert.equal(result.status, 1);
+  assert.match(output, /Git is already in a complicated relationship\./);
+  assert.match(output, /merge is still in progress\./);
+  assert.match(output, /left exactly where it[\s│]+was/);
+});
+
+test("fails closed when active Git operations cannot be inspected", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  commitFixableJson(tempDir, "operation-inspection", "operation inspection");
+  const env = fakeGitEnv(tempDir, "rev-parse --git-path rebase-apply/applying");
+  const before = captureRefusalState(tempDir, []);
+
+  const result = runCommitFix(tempDir, { env });
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 1);
+  assert.match(output, /Unable to inspect active Git operations\./);
+  assert.match(output, /No fixer tools ran/);
+  assert.deepEqual(captureRefusalState(tempDir, []), before);
 });
 
 test("refuses to amend a detached commit without moving it", (t) => {
@@ -1203,6 +1447,25 @@ test("refuses a concurrent target auto-save without amending it", async (t) => {
   );
   assert.equal(readFile(tempDir, file), concurrent);
   assert.equal(readHeadFile(tempDir, file), '{"alpha":1}\n');
+});
+
+test("refuses an operation that starts while fixer tools run", async (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  prepareBlockingCommit(tempDir);
+  let activeState;
+
+  const result = await runCommitFixDuringPrettier(tempDir, () => {
+    createOperationFixture(tempDir, "MERGE_HEAD", "file");
+    activeState = captureRefusalState(tempDir, ["MERGE_HEAD"]);
+  });
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 1);
+  assert.match(output, /Repository state changed while automatic fixes/);
+  assert.match(output, /latest commit was not amended/i);
+  fs.rmSync(path.join(tempDir, "fixer-release"), { force: true });
+  assert.deepEqual(captureRefusalState(tempDir, ["MERGE_HEAD"]), activeState);
 });
 
 test("preserves unrelated tracked worktree changes during fixer execution", async (t) => {

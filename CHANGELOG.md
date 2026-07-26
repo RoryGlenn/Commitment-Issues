@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `commit:fix` now refuses before fixer tools or repository mutation whenever
+  Git reports an active merge, cherry-pick, revert, rebase, `git am`, or
+  sequencer state. Worktree-specific operation paths are inspected fail-closed,
+  including clean-index and empty-operation pauses, and revalidated before
+  tools, worktree writes, index staging, and amend so continuation state is
+  preserved exactly.
 - Runtime checks, fixers, `panic`, and direct commit-message checks now resolve
   the owning Git worktree before loading root configuration, interpreting
   Git-reported paths, finding local tools, or launching child processes.

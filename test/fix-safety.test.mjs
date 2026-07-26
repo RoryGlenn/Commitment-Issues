@@ -12,6 +12,7 @@ import {
   captureFixSnapshot,
   eslintDiagnostics,
   eslintFixedOutput,
+  inspectGitOperationState,
   isFixStateChangedError,
   parseIndexStageEntries,
   runFixTools,
@@ -21,6 +22,7 @@ import {
   cleanupTempRepo,
   createTempRepo,
   fakeGitEnv,
+  fsFailurePreload,
   run as runCommand,
   writeFile,
 } from "./helpers/temp-repo.mjs";
@@ -94,6 +96,112 @@ try {
     { env },
   );
 }
+
+function gitMarkerPath(tempDir, marker) {
+  const result = runCommand(
+    "git",
+    ["rev-parse", "--git-path", marker],
+    tempDir,
+  );
+  assert.equal(result.status, 0, result.stderr);
+  return path.resolve(tempDir, result.stdout.replace(/\r?\n$/u, ""));
+}
+
+function runOperationProbe(tempDir, env = process.env) {
+  const moduleUrl = pathToFileURL(
+    path.join(tempDir, "scripts", "lib", "fix-safety.mjs"),
+  ).href;
+  const source = `
+import { inspectGitOperationState } from ${JSON.stringify(moduleUrl)};
+try {
+  process.stdout.write(JSON.stringify({ state: inspectGitOperationState() }));
+} catch (error) {
+  process.stdout.write(JSON.stringify({ code: error.code, message: error.message }));
+}
+`;
+  return runCommand(
+    process.execPath,
+    ["--input-type=module", "-e", source],
+    tempDir,
+    { env },
+  );
+}
+
+test("inspectGitOperationState classifies every amend-blocking marker", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+
+  const fixtures = [
+    { marker: "rebase-apply/applying", kind: "file", operation: "git am" },
+    { marker: "rebase-apply", kind: "directory", operation: "rebase" },
+    { marker: "rebase-merge", kind: "directory", operation: "rebase" },
+    { marker: "MERGE_HEAD", kind: "file", operation: "merge" },
+    { marker: "CHERRY_PICK_HEAD", kind: "file", operation: "cherry-pick" },
+    { marker: "REVERT_HEAD", kind: "file", operation: "revert" },
+    { marker: "sequencer", kind: "directory", operation: "sequencer" },
+  ];
+
+  assert.deepEqual(inRepo(tempDir, inspectGitOperationState), {
+    operation: null,
+    markers: [],
+  });
+  for (const fixture of fixtures) {
+    const markerPath = gitMarkerPath(tempDir, fixture.marker);
+    if (fixture.kind === "directory") {
+      fs.mkdirSync(markerPath, { recursive: true });
+    } else {
+      writeFile(markerPath, "operation state\n");
+    }
+
+    const state = inRepo(tempDir, inspectGitOperationState);
+    assert.equal(state.operation, fixture.operation, fixture.marker);
+    assert.ok(state.markers.includes(fixture.marker), fixture.marker);
+
+    const cleanupMarker = fixture.marker.startsWith("rebase-apply")
+      ? gitMarkerPath(tempDir, "rebase-apply")
+      : markerPath;
+    fs.rmSync(cleanupMarker, { recursive: true, force: true });
+  }
+});
+
+test("inspectGitOperationState fails closed on Git and path inspection errors", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const match = "rev-parse --git-path rebase-apply/applying";
+
+  const failed = runOperationProbe(tempDir, fakeGitEnv(tempDir, match));
+  assert.equal(failed.status, 0, failed.stderr);
+  assert.equal(JSON.parse(failed.stdout).code, "ERR_FIX_STATE_INSPECTION");
+
+  const missingGit = runOperationProbe(tempDir, {
+    ...process.env,
+    PATH: fs.mkdtempSync(path.join(tempDir, "empty-path-")),
+  });
+  assert.equal(missingGit.status, 0, missingGit.stderr);
+  assert.equal(JSON.parse(missingGit.stdout).code, "ERR_FIX_STATE_INSPECTION");
+
+  for (const output of ["\n", "invalid\0path\n"]) {
+    const malformed = runOperationProbe(
+      tempDir,
+      fakeGitEnv(tempDir, match, 0, output),
+    );
+    assert.equal(malformed.status, 0, malformed.stderr);
+    assert.equal(JSON.parse(malformed.stdout).code, "ERR_FIX_STATE_INSPECTION");
+  }
+
+  const markerPath = gitMarkerPath(tempDir, "MERGE_HEAD");
+  const preload = fsFailurePreload(tempDir);
+  const unreadable = runOperationProbe(tempDir, {
+    ...process.env,
+    NODE_OPTIONS: [process.env.NODE_OPTIONS, `--import=${preload}`]
+      .filter(Boolean)
+      .join(" "),
+    TEST_FS_FAILURE_METHOD: "lstatSync",
+    TEST_FS_FAILURE_PATH: markerPath,
+  });
+  assert.equal(unreadable.status, 0, unreadable.stderr);
+  assert.equal(JSON.parse(unreadable.stdout).code, "ERR_FIX_STATE_INSPECTION");
+});
 
 test("parseIndexStageEntries preserves exact Git paths and hash formats", () => {
   const first = "src/ leading\t\u732b\nfile.js";

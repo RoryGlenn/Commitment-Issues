@@ -16,6 +16,7 @@ import {
   applyFixOutputs,
   assertFixSnapshotUnchanged,
   captureFixSnapshot,
+  inspectGitOperationState,
   isFixStateChangedError,
   runFixTools,
   stageFixOutputs,
@@ -23,6 +24,7 @@ import {
 import { loadPrecommitConfig } from "./lib/config.mjs";
 import {
   buildCommitFixHistoryRefusalMessage,
+  buildCommitFixOperationRefusalMessage,
   buildConcurrentFixRefusalMessage,
 } from "./lib/message.mjs";
 
@@ -34,6 +36,36 @@ function fixerStateError(code, message) {
   const error = new Error(message);
   error.code = code;
   return error;
+}
+
+function refuseInitialOperationState(operation) {
+  const message = buildCommitFixOperationRefusalMessage({
+    operation,
+    tone,
+    rerunCommand: runScript("commit:fix"),
+  });
+  errorBox(message.lines);
+  process.exit(1);
+}
+
+function assertNoActiveGitOperation() {
+  const state = inspectGitOperationState();
+  if (state.operation) {
+    throw fixerStateError(
+      "ERR_FIX_STATE_CHANGED",
+      `Git ${state.operation} state became active.`,
+    );
+  }
+}
+
+let initialOperationState;
+try {
+  initialOperationState = inspectGitOperationState();
+} catch {
+  refuseInitialOperationState(null);
+}
+if (initialOperationState.operation) {
+  refuseInitialOperationState(initialOperationState.operation);
 }
 
 function inspectCommitAmendSafety(head) {
@@ -270,6 +302,7 @@ let fixResult;
 let stagedSnapshot;
 let changedFiles;
 try {
+  assertNoActiveGitOperation();
   const snapshot = captureFixSnapshot(fixableFiles);
   if (snapshot.head !== initialHead) {
     throw fixerStateError(
@@ -277,6 +310,7 @@ try {
       "HEAD changed before fixer inputs were captured.",
     );
   }
+  assertNoActiveGitOperation();
   fixResult = await runFixTools(snapshot.targets, {
     eslintFiles: committedJsFiles,
     prettierFiles: fixableFiles,
@@ -290,12 +324,14 @@ try {
   assertFixSnapshotUnchanged(snapshot);
   assertOnlyExpectedUnstagedChanges([]);
   assertCommitStillAmendable(initialHead, initialBranchRef);
+  assertNoActiveGitOperation();
 
   const appliedSnapshot = applyFixOutputs(snapshot, fixResult.outputs);
   const expectedChanges = appliedSnapshot.targets
     .filter((target) => !target.expectedContent.equals(target.initialContent))
     .map((target) => target.file);
   assertOnlyExpectedUnstagedChanges(expectedChanges);
+  assertNoActiveGitOperation();
   const staged = stageFixOutputs(appliedSnapshot);
   stagedSnapshot = staged.snapshot;
   changedFiles = staged.changedFiles;
@@ -370,6 +406,7 @@ try {
   assertFixSnapshotUnchanged(stagedSnapshot);
   assertOnlyExpectedUnstagedChanges([]);
   assertCommitStillAmendable(initialHead, initialBranchRef);
+  assertNoActiveGitOperation();
 } catch (error) {
   refuseUnsafeFix(error, "amend");
 }

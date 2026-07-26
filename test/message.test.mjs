@@ -8,6 +8,7 @@ import {
   appendPushWarnings,
   buildAdvisoryMessage,
   buildCommitFixHistoryRefusalMessage,
+  buildCommitFixOperationRefusalMessage,
   buildCommitMessageCheckMessage,
   buildConcurrentFixRefusalMessage,
   buildPushAllowedMessage,
@@ -78,6 +79,34 @@ test("commit-fix history refusals explain each fail-closed state", () => {
     /a tag or remote-tracking ref/,
   );
   assert.match(unavailable.lines.join("\n"), /safe to amend/);
+});
+
+test("commit-fix operation refusals distinguish active and unreadable state", () => {
+  const active = buildCommitFixOperationRefusalMessage({
+    operation: "revert",
+    rerunCommand: "pnpm run commit:fix",
+  });
+  const unreadable = buildCommitFixOperationRefusalMessage({
+    rerunCommand: "npm run commit:fix",
+  });
+
+  assert.equal(active.severity, "error");
+  assert.match(active.lines.join("\n"), /active Git operation/);
+  assert.match(active.lines.join("\n"), /active revert state/);
+  assert.match(active.lines.join("\n"), /pnpm run commit:fix/);
+  assert.match(
+    active.lines.join("\n"),
+    /operation state\s+were left unchanged/,
+  );
+  assert.match(unreadable.lines.join("\n"), /inspect active Git operations/);
+  assert.match(
+    unreadable.lines.join("\n"),
+    /merge,\s+cherry-pick, revert, rebase, git am, or sequencer state/,
+  );
+  assert.match(
+    unreadable.lines.join("\n"),
+    /repository state was left unchanged/,
+  );
 });
 
 test("advisory input normalization accepts omitted and legacy context shapes", () => {

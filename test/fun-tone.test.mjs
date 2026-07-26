@@ -7,6 +7,7 @@ import path from "node:path";
 import {
   buildAdvisoryMessage,
   buildCommitFixHistoryRefusalMessage,
+  buildCommitFixOperationRefusalMessage,
   buildConcurrentFixRefusalMessage,
 } from "../scripts/lib/message.mjs";
 import {
@@ -289,4 +290,22 @@ test("fun tone rewrites every commit-fix history refusal", () => {
   assert.match(messages.signed, /proper second ceremony/i);
   assert.match(messages.retained, /already seeing another Git ref/i);
   assert.match(messages.inspection, /relationship status/i);
+});
+
+test("fun tone rewrites commit-fix operation refusals", () => {
+  const active = buildCommitFixOperationRefusalMessage({
+    operation: "git am",
+    tone: "fun",
+    rerunCommand: "npm run commit:fix",
+  }).lines.join("\n");
+  const inspection = buildCommitFixOperationRefusalMessage({
+    tone: "fun",
+    rerunCommand: "npm run commit:fix",
+  }).lines.join("\n");
+
+  assert.match(active, /already in a complicated relationship/i);
+  assert.match(active, /git am is still in progress/i);
+  assert.match(active, /left exactly where it was/i);
+  assert.match(inspection, /would not explain its relationship status/i);
+  assert.match(inspection, /fixer is staying out of it/i);
 });

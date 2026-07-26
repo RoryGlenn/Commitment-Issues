@@ -123,8 +123,19 @@ discard files or force ref/history changes are outside this interface.
 - `fix:staged` runs staged-file fixes against an exact repository snapshot.
 - `commit:fix` applies safe automatic fixes and amends the latest clean commit
   only while it stays attached to the same local branch, remains unsigned, and
-  is absent from local tags and remote-tracking refs.
+  is absent from local tags and remote-tracking refs, with no merge,
+  cherry-pick, revert, rebase, `git am`, or sequencer operation active.
 - `test:precommit` runs pre-commit checks directly.
+
+Before `commit:fix` launches ESLint or Prettier, it asks Git for the
+worktree-specific paths of `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`,
+`rebase-apply`, `rebase-merge`, and `sequencer`, including the `git am`
+`rebase-apply/applying` marker. Any existing entry causes a refusal even when
+the index and worktree match `HEAD`, and an unavailable Git or filesystem probe
+also refuses rather than guessing. The same absence is revalidated before
+fixer execution, worktree writes, exact index staging, and amend. Refusal leaves
+the operation files, `HEAD`, index, and worktree available for the original Git
+continue, skip, or abort workflow.
 
 Both fix commands capture the initial `HEAD`, exact index-file identity and
 bytes, complete index tree, target entry mode and blob, and regular-file
@@ -145,11 +156,11 @@ attached to the same local branch, the commit has no signature header, and the
 original commit is still absent from local tags and remote-tracking refs both
 before staging and immediately before `git commit --amend`.
 
-A detected edit, deletion, path-type replacement, index update, `HEAD` move,
-branch-attachment change, newly known protected ref, lock conflict, or failed
-revalidation stops the command. It does not stage ambiguous bytes or amend a
-different commit. Concurrent user state remains available for review with
-`git status`.
+A detected active operation, edit, deletion, path-type replacement, index
+update, `HEAD` move, branch-attachment change, newly known protected ref, lock
+conflict, or failed revalidation stops the command. It does not stage ambiguous
+bytes or amend a different commit. Concurrent user state remains available for
+review with `git status`.
 
 This publication check is an offline local-snapshot contract. It covers every
 local tag and locally available remote-tracking ref. A tag or custom ref that

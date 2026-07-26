@@ -580,6 +580,53 @@ boxSvg({
 // ---------------- Commit fix ----------------
 
 boxSvg({
+  file: "commit-fix-active-operation.svg",
+  severity: "error",
+  title: "Active Git operation amend refusal terminal output",
+  desc: "A terminal-style error box refusing to amend while a Git revert is active.",
+  lines: [
+    { k: "t", text: "Cannot amend during an active Git operation." },
+    { k: "b" },
+    { k: "d", text: "Git reports active revert state." },
+    {
+      k: "d",
+      text: "Finish or abort it with Git before running this command again:",
+    },
+    { k: "b" },
+    { k: "bt", text: "npm run commit:fix" },
+    { k: "b" },
+    {
+      k: "d",
+      text: "No fixer tools ran. Files, the index, history, and operation state",
+    },
+    { k: "d", text: "were left unchanged." },
+  ],
+});
+
+boxSvg({
+  file: "commit-fix-operation-uninspectable.svg",
+  severity: "error",
+  title: "Git operation inspection refusal terminal output",
+  desc: "A terminal-style error box refusing to amend because active Git operations could not be inspected.",
+  lines: [
+    { k: "t", text: "Unable to inspect active Git operations." },
+    { k: "b" },
+    {
+      k: "d",
+      text: "The command refuses to run until Git can verify that no merge,",
+    },
+    {
+      k: "d",
+      text: "cherry-pick, revert, rebase, git am, or sequencer state is active.",
+    },
+    {
+      k: "d",
+      text: "No fixer tools ran, and repository state was left unchanged.",
+    },
+  ],
+});
+
+boxSvg({
   file: "commit-fix-protected-reference.svg",
   severity: "error",
   title: "Commit retained by protected reference terminal output",

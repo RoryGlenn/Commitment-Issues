@@ -550,6 +550,32 @@ Shown when `commit:fix` amends what it can but some issues still need manual att
 
 Shown when `commit:fix` checks the latest commit's files and finds nothing to change.
 
+### Active Git operation refusal
+
+<p>
+  <img src="../assets/commit-fix-active-operation.svg" alt="Error output refusing to amend while a Git revert is active" width="788">
+</p>
+
+Shown before fixer tools run when Git reports an active merge, cherry-pick,
+revert, rebase, `git am`, or sequencer state. The refusal also applies when the
+index and worktree match `HEAD`, so an empty or conflict-resolved operation
+cannot be silently replaced by an amend. Operation files, `HEAD`, the index,
+and worktree remain available to continue, skip, or abort with Git.
+
+The fun-tone title is `Git is already in a complicated relationship`; it leaves
+the same operation state exactly where it was.
+
+### Git operation state uninspectable
+
+<p>
+  <img src="../assets/commit-fix-operation-uninspectable.svg" alt="Error output refusing to amend because active Git operations could not be inspected" width="788">
+</p>
+
+Shown when Git cannot locate a worktree-specific operation marker or the
+filesystem cannot inspect one. The command fails closed before fixer tools or
+repository mutation. The fun-tone title is
+`Git would not explain its relationship status`.
+
 ### No automatic fixes landed
 
 <p>

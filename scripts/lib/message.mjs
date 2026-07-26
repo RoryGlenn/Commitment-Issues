@@ -87,6 +87,110 @@ export function buildConcurrentFixRefusalMessage({
   };
 }
 
+function fixerToolName(tool) {
+  return tool === "eslint" ? "ESLint" : "Prettier";
+}
+
+function interruptedToolDetail(interruption) {
+  const tool = fixerToolName(interruption.tool);
+  const file = interruption.file
+    ? ` while processing ${escapeTerminalText(interruption.file)}`
+    : "";
+  if (interruption.outcome === "timeout") {
+    return `${tool} timed out${file}.`;
+  }
+  if (interruption.outcome === "signal") {
+    const signal = interruption.signal
+      ? ` (${escapeTerminalText(interruption.signal)})`
+      : "";
+    return `${tool} stopped on a signal${signal}${file}.`;
+  }
+  if (interruption.outcome === "spawn-error") {
+    return `${tool} could not start${file}.`;
+  }
+  return `${tool} is not installed locally.`;
+}
+
+/**
+ * Build a refusal after an incomplete fixer process. Target paths that changed
+ * are reported exactly and intentionally left untouched.
+ * @param {{operation: "stage"|"amend", interruption: {tool: string, file: string|null, outcome: string, signal: string|null}, affectedFiles?: string[], missingTools?: string[], installCommand?: string, tone?: string, rerunCommand: string}} options - Interruption and presentation context.
+ * @returns {{severity: "error", lines: string[]}} Box model.
+ */
+export function buildInterruptedFixRefusalMessage({
+  operation,
+  interruption,
+  affectedFiles = [],
+  missingTools = [],
+  installCommand,
+  tone = "standard",
+  rerunCommand,
+}) {
+  const fun = normalizeTone(tone) === "fun";
+  const mutation =
+    operation === "amend"
+      ? "No interrupted output was staged or amended. The index and HEAD remain unchanged."
+      : "No interrupted output was staged. The index and HEAD remain unchanged.";
+  const affected =
+    affectedFiles.length === 0
+      ? [
+          pc.dim(
+            "Captured target files were verified unchanged after the interruption.",
+          ),
+        ]
+      : [
+          pc.dim(
+            "These target paths changed or could not be verified after the interruption:",
+          ),
+          "",
+          ...affectedFiles.map(
+            (file) => `  ${pc.bold(escapeTerminalText(file))}`,
+          ),
+          "",
+          pc.dim(
+            "Commitment Issues left those worktree paths untouched because it",
+          ),
+          pc.dim(
+            "cannot distinguish incomplete tool writes from concurrent user edits.",
+          ),
+          pc.dim("Review or restore them before retrying."),
+        ];
+  const missing =
+    missingTools.length > 0
+      ? [
+          "",
+          pc.dim(`Missing local tool(s): ${missingTools.join(", ")}.`),
+          ...(installCommand
+            ? [pc.dim(`Install them: ${escapeTerminalText(installCommand)}`)]
+            : []),
+        ]
+      : [];
+
+  return {
+    severity: "error",
+    lines: [
+      pc.bold(
+        fun
+          ? "A fixer left the makeover halfway through."
+          : "Automatic fixes were interrupted.",
+      ),
+      "",
+      pc.dim(interruptedToolDetail(interruption)),
+      pc.dim(mutation),
+      ...affected,
+      ...missing,
+      "",
+      pc.dim(
+        fun
+          ? "Once the files are ready for another try:"
+          : "After reviewing the files and git status, try again:",
+      ),
+      "",
+      `  ${pc.bold(escapeTerminalText(rerunCommand))}`,
+    ],
+  };
+}
+
 /**
  * Build a refusal when commit-fix finds or cannot inspect a Git operation.
  * @param {{operation?: string|null, tone?: string, rerunCommand: string}} options - Operation and presentation context.

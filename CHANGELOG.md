@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `fix:staged` and `commit:fix` now treat a timeout, signal, spawn failure, or
+  missing local fixer as an interruption, discard incomplete stdout, stop
+  before later tool phases, and refuse before applying, staging, or amending.
+  The exact pre-run index and `HEAD` remain unchanged. If a tool changed a
+  target path directly, the command reports every affected path and leaves its
+  worktree bytes untouched rather than risk overwriting concurrent user work;
+  completed nonzero lint runs can still contribute attributable fixes.
 - `fix:staged` and `commit:fix` now refuse before fixer tools when a target has
   assume-unchanged, skip-worktree, `core.ignoreStat`-derived, intent-to-add,
   sparse-checkout, unresolved, or other non-ordinary index state. Snapshot

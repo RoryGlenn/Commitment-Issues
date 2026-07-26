@@ -136,6 +136,14 @@ that another process edited, deleted, replaced, linked, staged, committed,
 attached a protected ref, or changed the active branch during the run, the
 command refuses and leaves that work out of its mutation.
 
+An incomplete fixer process also stops the transaction. Timeouts, signals,
+spawn failures, and missing local tools discard partial stdout and prevent
+later fixer phases, worktree writes, staging, or amend. The command preserves
+the exact index and `HEAD`; if the interrupted tool changed a target path
+directly, that path is named and left untouched because restoring it could
+overwrite a concurrent user edit. Completed nonzero lint runs are handled
+separately and may still supply attributable fixes.
+
 Publication proof is deliberately offline: local tags and remote-tracking refs
 are authoritative inputs, but a ref that exists only on a remote cannot be
 discovered without network access. The command does not contact remotes and

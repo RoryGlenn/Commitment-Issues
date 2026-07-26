@@ -125,6 +125,106 @@ export function installBlockingPrettierFixture(tempDir) {
   );
 }
 
+function interruptedFixerSource(tool, interruptTool) {
+  const pathFlag = tool === "eslint" ? "--stdin-filename" : "--stdin-filepath";
+  return [
+    'import fs from "node:fs";',
+    'import path from "node:path";',
+    'let input = "";',
+    'process.stdin.setEncoding("utf8");',
+    "for await (const chunk of process.stdin) input += chunk;",
+    `const pathFlag = ${JSON.stringify(pathFlag)};`,
+    "const pathIndex = process.argv.indexOf(pathFlag);",
+    'const file = pathIndex >= 0 ? process.argv[pathIndex + 1] : "";',
+    `const tool = ${JSON.stringify(tool)};`,
+    "fs.appendFileSync(process.env.FIXER_PHASE_LOG, `${tool}:${file}\\n`);",
+    ...(tool === interruptTool
+      ? [
+          "fs.writeFileSync(",
+          "  path.resolve(file),",
+          '  process.env.FIXER_PARTIAL_CONTENT ?? "{\\"partial\\":",',
+          ");",
+          "if (process.env.FIXER_UNEXPECTED_TARGET) {",
+          "  fs.writeFileSync(",
+          "    process.env.FIXER_UNEXPECTED_TARGET,",
+          '    process.env.FIXER_UNEXPECTED_CONTENT ?? "unexpected\\n",',
+          "  );",
+          "}",
+          "setInterval(() => {}, 1000);",
+        ]
+      : tool === "eslint"
+        ? [
+            "process.stdout.write(",
+            "  JSON.stringify([{",
+            "    filePath: path.resolve(file),",
+            "    messages: [],",
+            "    output: input,",
+            "  }]),",
+            ");",
+          ]
+        : ["process.stdout.write(input);"]),
+    "",
+  ].join("\n");
+}
+
+/**
+ * Install deterministic project-local ESLint and Prettier fixtures. The
+ * selected tool truncates each live target after consuming stdin, records the
+ * phase, and hangs until the normal fixer timeout terminates it. The other tool
+ * completes with unchanged attributable output.
+ * @param {string} tempDir - Disposable repository root.
+ * @param {{interruptTool: "eslint"|"prettier", partialContent?: string, unexpectedTarget?: string, unexpectedContent?: string}} options - Interrupted phase and side effects.
+ * @returns {{cacheFile: string, env: object, phaseLog: string}} Fixture state.
+ */
+export function installInterruptedFixerFixture(
+  tempDir,
+  {
+    interruptTool,
+    partialContent = '{"partial":',
+    unexpectedTarget,
+    unexpectedContent,
+  },
+) {
+  const nodeModules = path.join(tempDir, "node_modules");
+  const current = fs.lstatSync(nodeModules);
+  if (current.isSymbolicLink()) {
+    fs.unlinkSync(nodeModules);
+  } else {
+    fs.rmSync(nodeModules, { recursive: true });
+  }
+
+  for (const tool of ["eslint", "prettier"]) {
+    writeFile(
+      path.join(nodeModules, tool, "package.json"),
+      `${JSON.stringify({ name: tool, bin: `bin/${tool}.mjs` })}\n`,
+    );
+    writeFile(
+      path.join(nodeModules, tool, "bin", `${tool}.mjs`),
+      interruptedFixerSource(tool, interruptTool),
+    );
+  }
+
+  const fixtureDir = path.join(tempDir, ".git", "interrupted-fixer");
+  const phaseLog = path.join(fixtureDir, "phases.log");
+  const cacheFile = path.join(fixtureDir, "cache");
+  writeFile(cacheFile, "cache-before\n");
+  return {
+    cacheFile,
+    phaseLog,
+    env: {
+      ...process.env,
+      FIXER_PARTIAL_CONTENT: partialContent,
+      FIXER_PHASE_LOG: phaseLog,
+      ...(unexpectedTarget
+        ? { FIXER_UNEXPECTED_TARGET: unexpectedTarget }
+        : {}),
+      ...(unexpectedContent
+        ? { FIXER_UNEXPECTED_CONTENT: unexpectedContent }
+        : {}),
+    },
+  };
+}
+
 function interruptibleRunnerSource() {
   const worker = [
     'const fs = require("node:fs");',

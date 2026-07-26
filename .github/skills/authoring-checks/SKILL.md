@@ -83,8 +83,12 @@ Push pure logic **down into `scripts/lib/`** so it can be unit-tested directly; 
   worktree or index mutation; do not pass live target paths to writable
   formatter modes or replace exact blob staging with `git add`. Captured-input
   tool processes use bounded concurrency and share one `timeoutMs` deadline
-  across the complete fix operation. Parent-signal cancellation and timeout
-  cleanup must continue to share the same idempotent tracked-tree operation.
+  across the complete fix operation. Timeout, signal, spawn-error, and
+  missing-tool results are interruptions: discard their stdout, stop later
+  tool phases, inspect affected targets without restoring them, and refuse
+  before apply, stage, or amend. Completed nonzero lint is not an interruption.
+  Parent-signal cancellation and timeout cleanup must continue to share the
+  same idempotent tracked-tree operation.
 - `inspectGitOperationState` resolves worktree-specific merge, cherry-pick,
   revert, rebase, `git am`, and sequencer markers through Git and fails closed
   on an unavailable path or filesystem probe. `commit:fix` must call it before

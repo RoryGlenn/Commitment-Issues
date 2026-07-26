@@ -16,6 +16,7 @@ import {
   createTempRepo,
   fakeGitEnv,
   installBlockingPrettierFixture,
+  installInterruptedFixerFixture,
   installInterruptibleProcessFixture,
   REAL_GIT,
   readFile,
@@ -1313,6 +1314,102 @@ test(
   },
 );
 
+test("commit-fix reports truncate-then-timeout targets without amending", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  setPrecommitConfig(tempDir, { timeoutMs: 1200 });
+  run("git", ["add", "package.json"], tempDir);
+  run("git", ["commit", "-m", "configure fixer timeout"], tempDir);
+  const fixture = installInterruptedFixerFixture(tempDir, {
+    interruptTool: "prettier",
+    partialContent: "export const partial =",
+  });
+  run("git", ["rm", "--cached", "--force", "node_modules"], tempDir);
+
+  const files = ["src/first.js", "src/second.js"];
+  const originals = new Map([
+    [files[0], "export const first = 1;\n"],
+    [files[1], "export const second = 2;\n"],
+  ]);
+  for (const [file, content] of originals) {
+    writeFile(path.join(tempDir, file), content);
+  }
+  run("git", ["add", "--", ...files], tempDir);
+  run("git", ["commit", "-m", "add interrupted targets"], tempDir);
+  const headBefore = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+  const indexBefore = fs.readFileSync(gitPath(tempDir, "index"));
+  const objectsBefore = run("git", ["count-objects", "-v"], tempDir).stdout;
+
+  const result = runCommitFix(tempDir, { env: fixture.env });
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 1);
+  assert.match(output, /Automatic fixes were interrupted/);
+  assert.match(output, /Prettier timed out/);
+  assert.match(output, /No interrupted output was staged or amended/);
+  for (const file of files) {
+    assert.match(output, new RegExp(file.replace(".", "\\.")));
+    assert.equal(readFile(tempDir, file), "export const partial =");
+    assert.equal(readHeadFile(tempDir, file), originals.get(file));
+  }
+  assert.equal(
+    run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+    headBefore,
+  );
+  assert.deepEqual(fs.readFileSync(gitPath(tempDir, "index")), indexBefore);
+  assert.equal(
+    run("git", ["count-objects", "-v"], tempDir).stdout,
+    objectsBefore,
+  );
+  assert.equal(fs.readFileSync(fixture.cacheFile, "utf8"), "cache-before\n");
+  const phases = new Set(
+    fs.readFileSync(fixture.phaseLog, "utf8").trim().split("\n"),
+  );
+  assert.deepEqual(
+    phases,
+    new Set([
+      ...files.map((file) => `eslint:${file}`),
+      ...files.map((file) => `prettier:${file}`),
+    ]),
+  );
+});
+
+test("commit-fix refuses unexpected tracked writes from an interrupted tool", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  setPrecommitConfig(tempDir, { timeoutMs: 900 });
+  const unrelated = path.join(tempDir, "notes.txt");
+  writeFile(unrelated, "user notes\n");
+  run("git", ["add", "package.json", "notes.txt"], tempDir);
+  run("git", ["commit", "-m", "configure interrupted fixture"], tempDir);
+  const fixture = installInterruptedFixerFixture(tempDir, {
+    interruptTool: "prettier",
+    partialContent: "export const partial =",
+    unexpectedTarget: unrelated,
+    unexpectedContent: "tool side effect\n",
+  });
+  run("git", ["rm", "--cached", "--force", "node_modules"], tempDir);
+  const file = "src/input.js";
+  writeFile(path.join(tempDir, file), "export const input = 1;\n");
+  run("git", ["add", file], tempDir);
+  run("git", ["commit", "-m", "add interruption target"], tempDir);
+  const headBefore = run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
+  const indexBefore = fs.readFileSync(gitPath(tempDir, "index"));
+
+  const result = runCommitFix(tempDir, { env: fixture.env });
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 1);
+  assert.match(output, /Repository state changed while automatic fixes/);
+  assert.equal(readFile(tempDir, file), "export const partial =");
+  assert.equal(readFile(tempDir, "notes.txt"), "tool side effect\n");
+  assert.equal(
+    run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim(),
+    headBefore,
+  );
+  assert.deepEqual(fs.readFileSync(gitPath(tempDir, "index")), indexBefore);
+});
+
 test("reports local install guidance when committed-file tools are missing", (t) => {
   const tempDir = createTempRepo();
   t.after(() => cleanupTempRepo(tempDir));
@@ -1394,7 +1491,10 @@ test("commit-fix timeout cleans up fixer descendants", async (t) => {
   try {
     const result = runCommitFix(tempDir, { env });
     assert.equal(result.status, 1);
-    assert.match(`${result.stdout}${result.stderr}`, /Manual attention/);
+    assert.match(
+      `${result.stdout}${result.stderr}`,
+      /Automatic fixes were interrupted/,
+    );
     assert.equal(fs.existsSync(childPidFile), true, "grandchild should start");
 
     const beatAtTimeout = fs.readFileSync(heartbeat, "utf8");

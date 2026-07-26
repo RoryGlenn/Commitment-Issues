@@ -13,6 +13,7 @@ import {
   eslintDiagnostics,
   eslintFixedOutput,
   inspectGitOperationState,
+  inspectInterruptedFixState,
   isFixStateChangedError,
   parseIndexFlagEntries,
   parseIndexStageEntries,
@@ -880,6 +881,76 @@ test("snapshot revalidation classifies an ordinary target read failure", (t) => 
   );
 });
 
+test("interruption inspection reports exact targets without restoring them", (t) => {
+  const { tempDir, file } = createStagedTarget(t);
+  const snapshot = captureStagedTarget(tempDir, file);
+  const partial = '{"partial":';
+  writeFile(path.join(tempDir, file), partial);
+
+  const result = inRepo(tempDir, () => inspectInterruptedFixState(snapshot));
+
+  assert.deepEqual(result, { affectedFiles: [file] });
+  assert.equal(fs.readFileSync(path.join(tempDir, file), "utf8"), partial);
+  assert.equal(
+    runCommand("git", ["show", `:${file}`], tempDir).stdout,
+    snapshot.targets[0].initialContent.toString("utf8"),
+  );
+});
+
+test("interruption inspection verifies unchanged targets and immutable state", (t) => {
+  const { tempDir, file } = createStagedTarget(t);
+  const snapshot = captureStagedTarget(tempDir, file);
+
+  assert.deepEqual(
+    inRepo(tempDir, () => inspectInterruptedFixState(snapshot)),
+    { affectedFiles: [] },
+  );
+
+  runCommand("git", ["reset", "--soft", alternateHead(tempDir)], tempDir);
+  assert.throws(
+    () => inRepo(tempDir, () => inspectInterruptedFixState(snapshot)),
+    (error) => error.code === "ERR_FIX_STATE_CHANGED",
+  );
+});
+
+test("interruption inspection detects byte and active-index changes", (t) => {
+  const { tempDir, file } = createStagedTarget(t);
+  const snapshot = captureStagedTarget(tempDir, file);
+  const targetPath = path.join(tempDir, file);
+  writeFile(targetPath, '{"changed":true}\n');
+  const reboundSnapshot = {
+    ...snapshot,
+    targets: snapshot.targets.map((target) => ({
+      ...target,
+      state: {
+        ...target.state,
+        stats: fs.lstatSync(targetPath, { bigint: true }),
+      },
+    })),
+  };
+  assert.deepEqual(
+    inRepo(tempDir, () => inspectInterruptedFixState(reboundSnapshot)),
+    { affectedFiles: [file] },
+  );
+
+  const alternateIndex = path.join(tempDir, "alternate-index");
+  fs.copyFileSync(snapshot.indexPath, alternateIndex);
+  const previousIndex = process.env.GIT_INDEX_FILE;
+  process.env.GIT_INDEX_FILE = alternateIndex;
+  try {
+    assert.throws(
+      () => inRepo(tempDir, () => inspectInterruptedFixState(snapshot)),
+      (error) => error.code === "ERR_FIX_STATE_CHANGED",
+    );
+  } finally {
+    if (previousIndex === undefined) {
+      delete process.env.GIT_INDEX_FILE;
+    } else {
+      process.env.GIT_INDEX_FILE = previousIndex;
+    }
+  }
+});
+
 test("runFixTools rejects an uncaptured Prettier target", async () => {
   await assert.rejects(
     runFixTools([], {
@@ -947,6 +1018,7 @@ test(
 
     assert.equal(maximumActive, 2);
     assert.equal(result.toolFailed, false);
+    assert.equal(result.interruption, null);
     assert.deepEqual(
       [...result.outputs],
       targets.map((target) => [
@@ -1006,6 +1078,12 @@ test("runFixTools shares one deadline across ESLint and Prettier", async () => {
   ]);
   assert.equal(result.toolFailed, true);
   assert.deepEqual(result.missingTools, []);
+  assert.deepEqual(result.interruption, {
+    tool: "prettier",
+    file: files[0],
+    outcome: "timeout",
+    signal: null,
+  });
   assert.deepEqual(
     [...result.outputs],
     targets.map((target) => [
@@ -1045,6 +1123,12 @@ test("runFixTools stops launching files after its overall deadline", async () =>
 
   assert.deepEqual(calls, [{ name: "eslint", timeoutMs: 100 }]);
   assert.equal(result.toolFailed, true);
+  assert.deepEqual(result.interruption, {
+    tool: "prettier",
+    file,
+    outcome: "timeout",
+    signal: null,
+  });
 });
 
 test("runFixTools stops ESLint fan-out after an interrupted child", async () => {
@@ -1077,6 +1161,178 @@ test("runFixTools stops ESLint fan-out after an interrupted child", async () => 
 
   assert.equal(calls, 1);
   assert.equal(result.toolFailed, true);
+  assert.deepEqual(result.interruption, {
+    tool: "eslint",
+    file: files[0],
+    outcome: "timeout",
+    signal: null,
+  });
+});
+
+test("runFixTools preflights every required local tool before launching", async () => {
+  const file = "src/input.js";
+  let calls = 0;
+  const result = await runFixTools(
+    [{ file, expectedContent: Buffer.from("const value = 1;\n") }],
+    { eslintFiles: [file], prettierFiles: [file] },
+    {
+      resolveToolCommand: (name) => ({
+        command: null,
+        args: [],
+        missingTool: name,
+      }),
+      runToolCommand: async () => {
+        calls += 1;
+        throw new Error("a missing tool must not launch");
+      },
+    },
+  );
+
+  assert.equal(calls, 0);
+  assert.equal(result.toolFailed, true);
+  assert.deepEqual(result.missingTools, ["eslint", "prettier"]);
+  assert.deepEqual(result.interruption, {
+    tool: "eslint",
+    file: null,
+    outcome: "missing-tool",
+    signal: null,
+  });
+});
+
+for (const tool of ["eslint", "prettier"]) {
+  test(`runFixTools handles ${tool} disappearing after preflight`, async () => {
+    const file = "src/input.js";
+    const calls = [];
+    const result = await runFixTools(
+      [{ file, expectedContent: Buffer.from("const value = 1;\n") }],
+      {
+        eslintFiles: tool === "eslint" ? [file] : [],
+        prettierFiles: [file],
+      },
+      {
+        resolveToolCommand: () => ({
+          command: process.execPath,
+          args: [],
+        }),
+        runToolCommand: async (name) => {
+          calls.push(name);
+          return {
+            outcome: "missing-tool",
+            missingTool: name,
+            status: null,
+            signal: null,
+            stdout: "",
+            stderr: "",
+          };
+        },
+      },
+    );
+
+    assert.deepEqual(calls, [tool]);
+    assert.deepEqual(result.missingTools, [tool]);
+    assert.deepEqual(result.interruption, {
+      tool,
+      file,
+      outcome: "missing-tool",
+      signal: null,
+    });
+  });
+}
+
+for (const [outcome, extra] of [
+  ["timeout", { timedOut: true }],
+  ["signal", { signal: "SIGTERM" }],
+  ["spawn-error", { error: new Error("injected spawn failure") }],
+]) {
+  test(`runFixTools ignores partial ${outcome} output and skips later tools`, async () => {
+    const files = ["src/first.js", "src/second.js"];
+    const calls = [];
+    const input = "const value = 1;\n";
+    const partialOutput = JSON.stringify([
+      {
+        filePath: path.resolve(files[0]),
+        messages: [],
+        output: "const incomplete =",
+      },
+    ]);
+    const result = await runFixTools(
+      files.map((file) => ({
+        file,
+        expectedContent: Buffer.from(input),
+      })),
+      { eslintFiles: files, prettierFiles: files },
+      {
+        concurrency: 1,
+        now: () => 0,
+        timeoutMs: 100,
+        runToolCommand: async (name) => {
+          calls.push(name);
+          return {
+            outcome,
+            status: null,
+            signal: null,
+            stdout: partialOutput,
+            stderr: "",
+            ...extra,
+          };
+        },
+      },
+    );
+
+    assert.deepEqual(calls, ["eslint"]);
+    assert.equal(result.toolFailed, true);
+    assert.equal(result.interruption.outcome, outcome);
+    assert.deepEqual(
+      [...result.outputs.values()],
+      files.map(() => input),
+    );
+  });
+}
+
+test("runFixTools retains completed nonzero lint fixes before Prettier", async () => {
+  const file = "src/input.js";
+  const calls = [];
+  const result = await runFixTools(
+    [{ file, expectedContent: Buffer.from("let value = 1;\n") }],
+    { eslintFiles: [file], prettierFiles: [file] },
+    {
+      now: () => 0,
+      timeoutMs: 100,
+      runToolCommand: async (name, _args, options) => {
+        calls.push(name);
+        if (name === "eslint") {
+          return {
+            outcome: "nonzero",
+            status: 1,
+            signal: null,
+            stdout: JSON.stringify([
+              {
+                filePath: path.resolve(file),
+                messages: [{ message: "manual issue", ruleId: "manual" }],
+                output: "const value = 1;\n",
+              },
+            ]),
+            stderr: "",
+          };
+        }
+        return {
+          outcome: "success",
+          status: 0,
+          signal: null,
+          stdout: options.input.toUpperCase(),
+          stderr: "",
+        };
+      },
+    },
+  );
+
+  assert.deepEqual(calls, ["eslint", "prettier"]);
+  assert.equal(result.toolFailed, true);
+  assert.equal(result.interruption, null);
+  assert.equal(result.outputs.get(file), "CONST VALUE = 1;\n");
+  assert.deepEqual(result.diagnostics, [
+    "src/input.js: manual issue (manual)\n",
+  ]);
 });
 
 test("applyFixOutputs requires attributable output for every target", (t) => {

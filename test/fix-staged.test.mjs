@@ -32,6 +32,60 @@ function runFixStaged(tempDir, options = {}) {
   );
 }
 
+function gitPath(tempDir, name) {
+  const result = run("git", ["rev-parse", "--git-path", name], tempDir);
+  assert.equal(result.status, 0, result.stderr);
+  return path.resolve(tempDir, result.stdout.replace(/\r?\n$/u, ""));
+}
+
+function snapshotSelectedPath(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return { type: "missing" };
+  }
+  const stats = fs.lstatSync(filePath);
+  return {
+    type: stats.isFile() ? "file" : "other",
+    mode: stats.mode,
+    content: stats.isFile()
+      ? fs.readFileSync(filePath).toString("base64")
+      : null,
+  };
+}
+
+function captureFixState(tempDir, files) {
+  const head = run("git", ["rev-parse", "HEAD"], tempDir);
+  assert.equal(head.status, 0, head.stderr);
+  return {
+    head: head.stdout.trim(),
+    index: fs.readFileSync(gitPath(tempDir, "index")).toString("base64"),
+    targets: Object.fromEntries(
+      files.map((file) => [
+        file,
+        snapshotSelectedPath(path.join(tempDir, ...file.split("/"))),
+      ]),
+    ),
+  };
+}
+
+function markHiddenIndexState(tempDir, file, state) {
+  let result;
+  if (state === "core.ignoreStat") {
+    result = run("git", ["config", "core.ignoreStat", "true"], tempDir);
+    assert.equal(result.status, 0, result.stderr);
+    result = run(
+      "git",
+      ["update-index", "--really-refresh", "--", file],
+      tempDir,
+    );
+  } else {
+    result = run("git", ["update-index", `--${state}`, "--", file], tempDir);
+  }
+  assert.equal(result.status, 0, result.stderr);
+  const tag = run("git", ["ls-files", "-v", "--", file], tempDir);
+  assert.equal(tag.status, 0, tag.stderr);
+  assert.match(tag.stdout, state === "skip-worktree" ? /^S /u : /^h /u);
+}
+
 async function runFixStagedDuringPrettier(tempDir, mutate, env = {}) {
   const ready = path.join(tempDir, "fixer-ready");
   const release = path.join(tempDir, "fixer-release");
@@ -166,6 +220,91 @@ test("refuses to fix partially staged files", (t) => {
 
   assert.equal(result.status, 1);
   assert.match(output, /Cannot safely fix partially staged files\./);
+});
+
+for (const state of ["assume-unchanged", "skip-worktree", "core.ignoreStat"]) {
+  test(`fix-staged preserves private edits hidden by ${state}`, (t) => {
+    const tempDir = createTempRepo();
+    t.after(() => cleanupTempRepo(tempDir));
+    const file = `src/${state.replace(".", "-")}.json`;
+    writeFile(path.join(tempDir, file), '{"alpha":1}\n');
+    run("git", ["add", "--", file], tempDir);
+    markHiddenIndexState(tempDir, file, state);
+    writeFile(path.join(tempDir, file), '{"private":true}\n');
+    const hidden = run("git", ["diff", "--name-only", "--", file], tempDir);
+    assert.equal(hidden.status, 0, hidden.stderr);
+    assert.equal(hidden.stdout, "");
+    const before = captureFixState(tempDir, [file]);
+
+    const result = runFixStaged(tempDir);
+    const output = `${result.stdout}${result.stderr}`;
+
+    assert.equal(result.status, 1, output);
+    assert.match(
+      output,
+      state === "skip-worktree"
+        ? /skip-worktree index state/
+        : /assume-unchanged index state/,
+    );
+    assert.deepEqual(captureFixState(tempDir, [file]), before);
+  });
+}
+
+test("fix-staged preserves an unavailable sparse-checkout target", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const hiddenFile = "hidden/sparse.json";
+  const visibleFile = "visible/keep.txt";
+  writeFile(path.join(tempDir, hiddenFile), '{"alpha":0}\n');
+  writeFile(path.join(tempDir, visibleFile), "visible\n");
+  run("git", ["add", hiddenFile, visibleFile], tempDir);
+  const committed = run("git", ["commit", "-m", "add sparse files"], tempDir);
+  assert.equal(committed.status, 0, committed.stderr);
+  const initialized = run(
+    "git",
+    ["sparse-checkout", "init", "--cone"],
+    tempDir,
+  );
+  const selected = run("git", ["sparse-checkout", "set", "visible"], tempDir);
+  assert.equal(initialized.status, 0, initialized.stderr);
+  assert.equal(selected.status, 0, selected.stderr);
+  assert.equal(fs.existsSync(path.join(tempDir, hiddenFile)), false);
+
+  const blob = run("git", ["hash-object", "-w", "--stdin"], tempDir, {
+    input: '{"alpha":1}\n',
+  });
+  assert.equal(blob.status, 0, blob.stderr);
+  const staged = run(
+    "git",
+    ["update-index", "--cacheinfo", "100644", blob.stdout.trim(), hiddenFile],
+    tempDir,
+  );
+  assert.equal(staged.status, 0, staged.stderr);
+  const skipped = run(
+    "git",
+    ["update-index", "--skip-worktree", "--", hiddenFile],
+    tempDir,
+  );
+  assert.equal(skipped.status, 0, skipped.stderr);
+  assert.match(
+    run("git", ["ls-files", "-v", "--", hiddenFile], tempDir).stdout,
+    /^S /u,
+  );
+  assert.equal(
+    run("git", ["diff", "--cached", "--name-only", "--", hiddenFile], tempDir)
+      .stdout,
+    `${hiddenFile}\n`,
+  );
+  const before = captureFixState(tempDir, [hiddenFile, visibleFile]);
+
+  const result = runFixStaged(tempDir);
+
+  assert.equal(result.status, 1, `${result.stdout}${result.stderr}`);
+  assert.match(
+    `${result.stdout}${result.stderr}`,
+    /missing from the working tree/,
+  );
+  assert.deepEqual(captureFixState(tempDir, [hiddenFile, visibleFile]), before);
 });
 
 test(

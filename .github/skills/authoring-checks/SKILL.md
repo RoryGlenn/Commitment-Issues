@@ -74,7 +74,12 @@ Push pure logic **down into `scripts/lib/`** so it can be unit-tested directly; 
 
 - `captureFixSnapshot`, `runFixTools`, `applyFixOutputs`, and
   `stageFixOutputs` bind explicit fixer commands to exact `HEAD`, index
-  identity/bytes/tree, and target bytes. Use this transaction for live
+  identity/bytes and target blob, identity, and bytes. Capture must refuse
+  assume-unchanged, skip-worktree, `core.ignoreStat`-derived, sparse-checkout,
+  intent-to-add, unresolved, non-regular, and other non-ordinary target index
+  states before tools run, then revalidate every bound identity after its Git
+  probes. Do not run a proof-only `git write-tree` against the live index; use
+  it only against the isolated prepared index. Use this transaction for live
   worktree or index mutation; do not pass live target paths to writable
   formatter modes or replace exact blob staging with `git add`. Captured-input
   tool processes use bounded concurrency and share one `timeoutMs` deadline

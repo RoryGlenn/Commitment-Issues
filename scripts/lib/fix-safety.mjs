@@ -44,6 +44,10 @@ function changedError(message, cause) {
   return fixError("ERR_FIX_STATE_CHANGED", message, cause);
 }
 
+function unsafeTargetError(message, cause) {
+  return fixError("ERR_FIX_TARGET_UNSAFE", message, cause);
+}
+
 function applyError(message, cause) {
   return fixError("ERR_FIX_APPLY", message, cause);
 }
@@ -119,13 +123,6 @@ function currentHead({ allowUnbornHead }) {
     return null;
   }
   throw inspectionError("Unable to inspect HEAD.", result.error);
-}
-
-function currentIndexTree() {
-  return requireSuccessful(
-    run("git", ["write-tree"]),
-    "Unable to inspect the Git index.",
-  ).trim();
 }
 
 function currentIndexPath() {
@@ -208,19 +205,104 @@ export function parseIndexStageEntries(output) {
     });
 }
 
+/**
+ * Parse NUL-delimited `git ls-files -v` records. Uppercase `H` is the only
+ * ordinary tracked-file state; lowercase tags expose assume-unchanged and `S`
+ * exposes skip-worktree.
+ * @param {string} output - Raw Git output.
+ * @returns {Array<{tag: string, file: string}>} Entries.
+ */
+export function parseIndexFlagEntries(output) {
+  if (output === "") {
+    return [];
+  }
+  if (!output.endsWith("\0")) {
+    throw inspectionError("Git returned malformed index flag entries.");
+  }
+
+  return output
+    .slice(0, -1)
+    .split("\0")
+    .map((record) => {
+      const tag = record[0];
+      const file = record.slice(2);
+      if (
+        record.length < 3 ||
+        record[1] !== " " ||
+        !/^[^\s\0]$/u.test(tag) ||
+        file.length === 0
+      ) {
+        throw inspectionError("Git returned malformed index flag entries.");
+      }
+      return { tag, file };
+    });
+}
+
+/**
+ * Parse ordinary changed entries from NUL-delimited porcelain-v2 status.
+ * Target discovery disables renames and untracked files, so any other record
+ * shape is an unsafe or malformed target state.
+ * @param {string} output - Raw Git output.
+ * @returns {Array<{file: string, headMode: string, indexMode: string, worktreeMode: string, headOid: string, indexOid: string}>} Entries.
+ */
+export function parseTargetStatusEntries(output) {
+  if (output === "") {
+    return [];
+  }
+  if (!output.endsWith("\0")) {
+    throw inspectionError("Git returned malformed target status entries.");
+  }
+
+  return output
+    .slice(0, -1)
+    .split("\0")
+    .map((record) => {
+      const match =
+        /^1 ([^ ]{2}) ([^ ]{4}) ([0-7]{6}) ([0-7]{6}) ([0-7]{6}) ([0-9a-f]{40}|[0-9a-f]{64}) ([0-9a-f]{40}|[0-9a-f]{64}) ([\s\S]+)$/u.exec(
+          record,
+        );
+      if (!match) {
+        throw inspectionError("Git returned malformed target status entries.");
+      }
+      return {
+        headMode: match[3],
+        indexMode: match[4],
+        worktreeMode: match[5],
+        headOid: match[6],
+        indexOid: match[7],
+        file: match[8],
+      };
+    });
+}
+
+function entriesByFile(entries) {
+  const byFile = new Map();
+  for (const entry of entries) {
+    const values = byFile.get(entry.file) ?? [];
+    values.push(entry);
+    byFile.set(entry.file, values);
+  }
+  return byFile;
+}
+
+function specialIndexState(tag) {
+  if (tag === "S" || tag === "s") {
+    return "skip-worktree";
+  }
+  if (tag.toLowerCase() === tag) {
+    return "assume-unchanged";
+  }
+  return "non-ordinary";
+}
+
 function targetEntries(files) {
   const output = requireSuccessful(
     run("git", [...GIT_PATH_ARGS, "ls-files", "--stage", "-z", "--", ...files]),
     "Unable to inspect target index entries.",
   );
-  const byFile = new Map();
-  for (const entry of parseIndexStageEntries(output)) {
-    const entries = byFile.get(entry.file) ?? [];
-    entries.push(entry);
-    byFile.set(entry.file, entries);
-  }
+  const byFile = entriesByFile(parseIndexStageEntries(output));
 
-  return files.map((file) => {
+  const entries = files.map((file) => {
     const entries = byFile.get(file) ?? [];
     if (
       entries.length !== 1 ||
@@ -231,6 +313,56 @@ function targetEntries(files) {
     }
     return entries[0];
   });
+
+  const flagOutput = requireSuccessful(
+    run("git", [...GIT_PATH_ARGS, "ls-files", "-v", "-z", "--", ...files]),
+    "Unable to inspect target index flags.",
+  );
+  const flagsByFile = entriesByFile(parseIndexFlagEntries(flagOutput));
+  for (const file of files) {
+    const flags = flagsByFile.get(file) ?? [];
+    if (flags.length !== 1) {
+      throw changedError(`Target index entry changed: ${file}`);
+    }
+    if (flags[0].tag !== "H") {
+      throw unsafeTargetError(
+        `Target has ${specialIndexState(flags[0].tag)} index state: ${file}`,
+      );
+    }
+  }
+
+  const statusOutput = requireSuccessful(
+    run(
+      "git",
+      [
+        ...GIT_PATH_ARGS,
+        "status",
+        "--porcelain=v2",
+        "-z",
+        "--untracked-files=no",
+        "--no-renames",
+        "--",
+        ...files,
+      ],
+      {
+        env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+      },
+    ),
+    "Unable to inspect target index intent.",
+  );
+  const targetFiles = new Set(files);
+  for (const entry of parseTargetStatusEntries(statusOutput)) {
+    if (!targetFiles.has(entry.file)) {
+      throw inspectionError("Git returned an unexpected target status path.");
+    }
+    if (entry.indexMode === "000000") {
+      throw unsafeTargetError(
+        `Target has intent-to-add index state: ${entry.file}`,
+      );
+    }
+  }
+
+  return entries;
 }
 
 function blobContents(oid) {
@@ -273,15 +405,14 @@ function captureTarget(entry) {
 }
 
 /**
- * Bind a fixer run to the exact current HEAD, index file/tree, and target bytes.
+ * Bind a fixer run to the exact current HEAD, index file, and target bytes.
  * @param {string[]} files - Project-relative target paths.
  * @param {{allowUnbornHead?: boolean}} [options] - Whether a missing HEAD is valid.
- * @returns {{allowUnbornHead: boolean, head: string|null, indexTree: string, indexPath: string, indexState: ReturnType<typeof inspectMutableProjectFile>, indexContent: Buffer, targets: ReturnType<typeof captureTarget>[]}} Snapshot.
+ * @returns {{allowUnbornHead: boolean, head: string|null, indexPath: string, indexState: ReturnType<typeof inspectMutableProjectFile>, indexContent: Buffer, targets: ReturnType<typeof captureTarget>[]}} Snapshot.
  */
 export function captureFixSnapshot(files, { allowUnbornHead = false } = {}) {
   const uniqueFiles = [...new Set(files)];
   const head = currentHead({ allowUnbornHead });
-  const indexTree = currentIndexTree();
   const indexPath = currentIndexPath();
   const indexFile = captureIndexFile(indexPath);
   const entries = targetEntries(uniqueFiles);
@@ -297,15 +428,18 @@ export function captureFixSnapshot(files, { allowUnbornHead = false } = {}) {
     targetIdentities.add(identity);
   }
 
-  return {
+  const snapshot = {
     allowUnbornHead,
     head,
-    indexTree,
     indexPath,
     indexState: indexFile.state,
     indexContent: indexFile.content,
     targets,
   };
+  // Git probes happen after the index bytes are captured. Re-read every bound
+  // identity before returning so no tool starts from a mixed-time snapshot.
+  assertFixSnapshotUnchanged(snapshot);
+  return snapshot;
 }
 
 function readExpectedTarget(target) {
@@ -652,12 +786,8 @@ function writeIndexInfo(tempIndex, entries, recordIdentity) {
   requireSuccessful(updateResult, "Unable to prepare exact staged fixes.");
   recordIdentity(fs.lstatSync(tempIndex, { bigint: true }));
   const treeResult = run("git", ["write-tree"], { env });
-  const tree = requireSuccessful(
-    treeResult,
-    "Unable to verify exact staged fixes.",
-  ).trim();
+  requireSuccessful(treeResult, "Unable to verify exact staged fixes.");
   recordIdentity(fs.lstatSync(tempIndex, { bigint: true }));
-  return tree;
 }
 
 /**
@@ -700,7 +830,7 @@ export function stageFixOutputs(snapshot) {
     assertFixSnapshotUnchanged(snapshot);
     fs.copyFileSync(snapshot.indexPath, tempIndex, fs.constants.COPYFILE_EXCL);
     tempIdentity = fs.lstatSync(tempIndex, { bigint: true });
-    const expectedTree = writeIndexInfo(tempIndex, entries, (identity) => {
+    writeIndexInfo(tempIndex, entries, (identity) => {
       tempIdentity = identity;
     });
     const indexMode = fs.statSync(snapshot.indexPath).mode & 0o777;
@@ -752,15 +882,14 @@ export function stageFixOutputs(snapshot) {
       throw changedError("HEAD changed as automatic fixes were staged.");
     }
     assertFixTargetsUnchanged(snapshot);
-    const updated = { ...snapshot, indexTree: expectedTree };
     assertIndexFileUnchanged({
-      ...updated,
+      ...snapshot,
       indexState: installedIndex.state,
       indexContent: installedIndex.content,
     });
     result = {
       snapshot: {
-        ...updated,
+        ...snapshot,
         indexState: installedIndex.state,
         indexContent: installedIndex.content,
       },

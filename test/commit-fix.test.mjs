@@ -89,6 +89,25 @@ function commitFixableJson(tempDir, name, message) {
   return file;
 }
 
+function markHiddenIndexState(tempDir, file, state) {
+  let result;
+  if (state === "core.ignoreStat") {
+    result = run("git", ["config", "core.ignoreStat", "true"], tempDir);
+    assert.equal(result.status, 0, result.stderr);
+    result = run(
+      "git",
+      ["update-index", "--really-refresh", "--", file],
+      tempDir,
+    );
+  } else {
+    result = run("git", ["update-index", `--${state}`, "--", file], tempDir);
+  }
+  assert.equal(result.status, 0, result.stderr);
+  const tag = run("git", ["ls-files", "-v", "--", file], tempDir);
+  assert.equal(tag.status, 0, tag.stderr);
+  assert.match(tag.stdout, state === "skip-worktree" ? /^S /u : /^h /u);
+}
+
 function gitPath(tempDir, name) {
   const result = run("git", ["rev-parse", "--git-path", name], tempDir);
   assert.equal(result.status, 0, result.stderr);
@@ -263,6 +282,69 @@ test("refuses to amend when tracked worktree changes exist", (t) => {
 
   assert.equal(result.status, 1);
   assert.match(output, /Cannot safely amend the latest commit\./);
+});
+
+for (const state of ["assume-unchanged", "skip-worktree", "core.ignoreStat"]) {
+  test(`commit-fix preserves private edits hidden by ${state}`, (t) => {
+    const tempDir = createTempRepo();
+    t.after(() => cleanupTempRepo(tempDir));
+    const file = commitFixableJson(
+      tempDir,
+      `hidden-${state.replace(".", "-")}`,
+      `add ${state} target`,
+    );
+    markHiddenIndexState(tempDir, file, state);
+    writeFile(path.join(tempDir, file), '{"private":true}\n');
+    const hidden = run("git", ["diff", "--name-only", "--", file], tempDir);
+    assert.equal(hidden.status, 0, hidden.stderr);
+    assert.equal(hidden.stdout, "");
+    const before = captureRefusalState(tempDir, []);
+
+    const result = runCommitFix(tempDir);
+    const output = `${result.stdout}${result.stderr}`;
+
+    assert.equal(result.status, 1, output);
+    assert.match(
+      output,
+      state === "skip-worktree"
+        ? /skip-worktree index state/
+        : /assume-unchanged index state/,
+    );
+    assert.deepEqual(captureRefusalState(tempDir, []), before);
+  });
+}
+
+test("commit-fix preserves an unavailable sparse-checkout target", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const hiddenFile = "hidden/sparse.json";
+  const visibleFile = "visible/keep.txt";
+  writeFile(path.join(tempDir, hiddenFile), '{"alpha":1}\n');
+  writeFile(path.join(tempDir, visibleFile), "visible\n");
+  run("git", ["add", hiddenFile, visibleFile], tempDir);
+  const committed = run("git", ["commit", "-m", "add sparse target"], tempDir);
+  assert.equal(committed.status, 0, committed.stderr);
+  const initialized = run(
+    "git",
+    ["sparse-checkout", "init", "--cone"],
+    tempDir,
+  );
+  const selected = run("git", ["sparse-checkout", "set", "visible"], tempDir);
+  assert.equal(initialized.status, 0, initialized.stderr);
+  assert.equal(selected.status, 0, selected.stderr);
+  assert.equal(fs.existsSync(path.join(tempDir, hiddenFile)), false);
+  assert.match(
+    run("git", ["ls-files", "-v", "--", hiddenFile], tempDir).stdout,
+    /^S /u,
+  );
+  const before = captureRefusalState(tempDir, []);
+
+  const result = runCommitFix(tempDir);
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 1, output);
+  assert.match(output, /skip-worktree index state/);
+  assert.deepEqual(captureRefusalState(tempDir, []), before);
 });
 
 test("shows info when the latest commit has no fixable files", (t) => {

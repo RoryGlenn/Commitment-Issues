@@ -14,7 +14,9 @@ import {
   eslintFixedOutput,
   inspectGitOperationState,
   isFixStateChangedError,
+  parseIndexFlagEntries,
   parseIndexStageEntries,
+  parseTargetStatusEntries,
   runFixTools,
   stageFixOutputs,
 } from "../scripts/lib/fix-safety.mjs";
@@ -242,6 +244,79 @@ test("parseIndexStageEntries rejects incomplete and malformed records", () => {
   }
 });
 
+test("parseIndexFlagEntries preserves tags and exact Git paths", () => {
+  const first = "src/ leading\t\u732b\nfile.js";
+  const second = "src/skipped.json";
+
+  assert.deepEqual(parseIndexFlagEntries(`h ${first}\0S ${second}\0`), [
+    { tag: "h", file: first },
+    { tag: "S", file: second },
+  ]);
+  assert.deepEqual(parseIndexFlagEntries(""), []);
+});
+
+test("parseIndexFlagEntries rejects incomplete and malformed records", () => {
+  for (const output of [
+    "H src/a.js",
+    "H\tsrc/a.js\0",
+    "HH src/a.js\0",
+    "H \0",
+    " src/a.js\0",
+  ]) {
+    assert.throws(
+      () => parseIndexFlagEntries(output),
+      (error) => error.code === "ERR_FIX_STATE_INSPECTION",
+    );
+  }
+});
+
+test("parseTargetStatusEntries preserves modes, object ids, and paths", () => {
+  const first = "src/ leading\t\u732b\nfile.js";
+  const second = "src/sha256.json";
+  const sha1 = "a".repeat(40);
+  const sha256 = "b".repeat(64);
+  const output =
+    `1 .M N... 100644 100644 100755 ${sha1} ${sha1} ${first}\0` +
+    `1 A. N... 000000 100644 100644 ${"0".repeat(64)} ${sha256} ${second}\0`;
+
+  assert.deepEqual(parseTargetStatusEntries(output), [
+    {
+      headMode: "100644",
+      indexMode: "100644",
+      worktreeMode: "100755",
+      headOid: sha1,
+      indexOid: sha1,
+      file: first,
+    },
+    {
+      headMode: "000000",
+      indexMode: "100644",
+      worktreeMode: "100644",
+      headOid: "0".repeat(64),
+      indexOid: sha256,
+      file: second,
+    },
+  ]);
+  assert.deepEqual(parseTargetStatusEntries(""), []);
+});
+
+test("parseTargetStatusEntries rejects unsupported and malformed records", () => {
+  const oid = "a".repeat(40);
+  for (const output of [
+    `1 .M N... 100644 100644 100644 ${oid} ${oid} src/a.js`,
+    `2 R. N... 100644 100644 100644 ${oid} ${oid} R100 src/a.js\0src/b.js\0`,
+    `u UU N... 100644 100644 100644 100644 ${oid} ${oid} ${oid} src/a.js\0`,
+    `1 .M N... 10064 100644 100644 ${oid} ${oid} src/a.js\0`,
+    `1 .M N... 100644 100644 100644 ${"a".repeat(39)} ${oid} src/a.js\0`,
+    `1 .M N... 100644 100644 100644 ${oid} ${oid} \0`,
+  ]) {
+    assert.throws(
+      () => parseTargetStatusEntries(output),
+      (error) => error.code === "ERR_FIX_STATE_INSPECTION",
+    );
+  }
+});
+
 test("eslintFixedOutput accepts only the expected single-file report", () => {
   const file = path.resolve("src/input.js");
   const input = "let value=1\n";
@@ -373,6 +448,216 @@ test("captureFixSnapshot rejects invalid targets and unreadable blobs", (t) => {
   );
 });
 
+test("captureFixSnapshot preserves an unresolved target conflict", (t) => {
+  const { tempDir, file } = createStagedTarget(t);
+  const objectIds = ["base\n", "ours\n", "theirs\n"].map((content) => {
+    const result = runCommand(
+      "git",
+      ["hash-object", "-w", "--stdin"],
+      tempDir,
+      {
+        input: content,
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  });
+  const removed = runCommand(
+    "git",
+    ["update-index", "--force-remove", "--", file],
+    tempDir,
+  );
+  assert.equal(removed.status, 0, removed.stderr);
+  const conflicted = runCommand(
+    "git",
+    ["update-index", "--index-info"],
+    tempDir,
+    {
+      input: objectIds
+        .map((oid, index) => `100644 ${oid} ${index + 1}\t${file}\n`)
+        .join(""),
+    },
+  );
+  assert.equal(conflicted.status, 0, conflicted.stderr);
+  const indexPath = path.join(tempDir, ".git", "index");
+  const before = fs.readFileSync(indexPath);
+
+  assert.throws(
+    () => captureStagedTarget(tempDir, file),
+    (error) => error.code === "ERR_FIX_STATE_CHANGED",
+  );
+  assert.deepEqual(fs.readFileSync(indexPath), before);
+});
+
+test("captureFixSnapshot rejects assume-unchanged and skip-worktree targets", (t) => {
+  const { tempDir, file } = createStagedTarget(t);
+
+  for (const [flag, expected] of [
+    ["--assume-unchanged", /assume-unchanged index state/],
+    ["--skip-worktree", /skip-worktree index state/],
+  ]) {
+    const clear = runCommand(
+      "git",
+      [
+        "update-index",
+        "--no-assume-unchanged",
+        "--no-skip-worktree",
+        "--",
+        file,
+      ],
+      tempDir,
+    );
+    const update = runCommand(
+      "git",
+      ["update-index", flag, "--", file],
+      tempDir,
+    );
+    assert.equal(clear.status, 0, clear.stderr);
+    assert.equal(update.status, 0, update.stderr);
+    assert.throws(
+      () => captureStagedTarget(tempDir, file),
+      (error) =>
+        error.code === "ERR_FIX_TARGET_UNSAFE" && expected.test(error.message),
+    );
+  }
+});
+
+test("captureFixSnapshot fails closed on unsafe index flag probe results", (t) => {
+  const { tempDir, file } = createStagedTarget(t);
+  const match = "ls-files -v -z --";
+
+  const failed = runCaptureProbe(tempDir, fakeGitEnv(tempDir, match));
+  assert.deepEqual(JSON.parse(failed.stdout), {
+    code: "ERR_FIX_STATE_INSPECTION",
+    message: "Unable to inspect target index flags.",
+  });
+
+  const missing = runCaptureProbe(
+    tempDir,
+    fakeGitEnv(tempDir, match, 0, "H src/other.json\0"),
+  );
+  assert.match(
+    JSON.parse(missing.stdout).message,
+    /Target index entry changed/,
+  );
+
+  const nonordinary = runCaptureProbe(
+    tempDir,
+    fakeGitEnv(tempDir, match, 0, `X ${file}\0`),
+  );
+  assert.deepEqual(JSON.parse(nonordinary.stdout), {
+    code: "ERR_FIX_TARGET_UNSAFE",
+    message: `Target has non-ordinary index state: ${file}`,
+  });
+});
+
+test("captureFixSnapshot fails closed on unsafe target status probes", (t) => {
+  const { tempDir } = createStagedTarget(t);
+  const match = "status --porcelain=v2 -z";
+
+  const failed = runCaptureProbe(tempDir, fakeGitEnv(tempDir, match));
+  assert.deepEqual(JSON.parse(failed.stdout), {
+    code: "ERR_FIX_STATE_INSPECTION",
+    message: "Unable to inspect target index intent.",
+  });
+
+  const oid = "a".repeat(40);
+  const unexpected = runCaptureProbe(
+    tempDir,
+    fakeGitEnv(
+      tempDir,
+      match,
+      0,
+      `1 .M N... 100644 100644 100644 ${oid} ${oid} src/other.json\0`,
+    ),
+  );
+  assert.deepEqual(JSON.parse(unexpected.stdout), {
+    code: "ERR_FIX_STATE_INSPECTION",
+    message: "Git returned an unexpected target status path.",
+  });
+});
+
+test("captureFixSnapshot rejects core.ignoreStat assume-unchanged targets", (t) => {
+  const { tempDir, file } = createStagedTarget(t);
+  const configured = runCommand(
+    "git",
+    ["config", "core.ignoreStat", "true"],
+    tempDir,
+  );
+  const refreshed = runCommand(
+    "git",
+    ["update-index", "--really-refresh", "--", file],
+    tempDir,
+  );
+  assert.equal(configured.status, 0, configured.stderr);
+  assert.equal(refreshed.status, 0, refreshed.stderr);
+  assert.match(
+    runCommand("git", ["ls-files", "-v", "--", file], tempDir).stdout,
+    /^h /u,
+  );
+
+  assert.throws(
+    () => captureStagedTarget(tempDir, file),
+    (error) =>
+      error.code === "ERR_FIX_TARGET_UNSAFE" &&
+      /assume-unchanged index state/u.test(error.message),
+  );
+});
+
+test("captureFixSnapshot rejects intent-to-add targets even when empty", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const file = "src/intent.json";
+  writeFile(path.join(tempDir, file), "");
+  const intent = runCommand(
+    "git",
+    ["add", "--intent-to-add", "--", file],
+    tempDir,
+  );
+  assert.equal(intent.status, 0, intent.stderr);
+
+  assert.throws(
+    () => captureStagedTarget(tempDir, file),
+    (error) =>
+      error.code === "ERR_FIX_TARGET_UNSAFE" &&
+      /intent-to-add index state/u.test(error.message),
+  );
+});
+
+test("captureFixSnapshot rejects a sparse-checkout target before reading it", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  const file = "hidden/input.json";
+  writeFile(path.join(tempDir, file), '{"hidden":true}\n');
+  writeFile(path.join(tempDir, "visible", "keep.txt"), "visible\n");
+  runCommand("git", ["add", "hidden/input.json", "visible/keep.txt"], tempDir);
+  runCommand("git", ["commit", "-m", "add sparse targets"], tempDir);
+  const initialized = runCommand(
+    "git",
+    ["sparse-checkout", "init", "--cone"],
+    tempDir,
+  );
+  const selected = runCommand(
+    "git",
+    ["sparse-checkout", "set", "visible"],
+    tempDir,
+  );
+  assert.equal(initialized.status, 0, initialized.stderr);
+  assert.equal(selected.status, 0, selected.stderr);
+  assert.equal(fs.existsSync(path.join(tempDir, file)), false);
+  assert.match(
+    runCommand("git", ["ls-files", "-v", "--", file], tempDir).stdout,
+    /^S /u,
+  );
+
+  assert.throws(
+    () => captureStagedTarget(tempDir, file),
+    (error) =>
+      error.code === "ERR_FIX_TARGET_UNSAFE" &&
+      /skip-worktree index state/u.test(error.message),
+  );
+});
+
 for (const [code, expectedCode] of [
   ["ELOOP", "ERR_FIX_STATE_CHANGED"],
   ["EACCES", "ERR_FIX_STATE_INSPECTION"],
@@ -469,6 +754,7 @@ test("snapshot revalidation distinguishes index identity and target bytes", (t) 
 
 test("snapshot revalidation detects index metadata changes with the same tree", (t) => {
   const { tempDir, file } = createStagedTarget(t);
+  const initialTree = runCommand("git", ["write-tree"], tempDir).stdout.trim();
   const snapshot = captureStagedTarget(tempDir, file);
 
   const update = runCommand(
@@ -479,7 +765,7 @@ test("snapshot revalidation detects index metadata changes with the same tree", 
   assert.equal(update.status, 0);
   assert.equal(
     runCommand("git", ["write-tree"], tempDir).stdout.trim(),
-    snapshot.indexTree,
+    initialTree,
   );
   assert.throws(
     () => inRepo(tempDir, () => assertFixSnapshotUnchanged(snapshot)),
@@ -513,8 +799,40 @@ test("snapshot revalidation does not run a mutating live write-tree probe", (t) 
     process.env[key] = env[key];
   }
 
+  assert.doesNotThrow(() => captureStagedTarget(tempDir, file));
   assert.doesNotThrow(() =>
     inRepo(tempDir, () => assertFixSnapshotUnchanged(snapshot)),
+  );
+});
+
+test("captureFixSnapshot revalidates index bytes after target probes", (t) => {
+  const { tempDir, file } = createStagedTarget(t);
+  const indexPath = inRepo(tempDir, () => path.resolve(".git", "index"));
+  const originalOpen = fs.openSync;
+  const originalRead = fs.readFileSync;
+  const indexDescriptors = new Set();
+  let indexReads = 0;
+  t.mock.method(fs, "openSync", (filePath, ...args) => {
+    const descriptor = originalOpen(filePath, ...args);
+    if (path.resolve(String(filePath)) === indexPath) {
+      indexDescriptors.add(descriptor);
+    }
+    return descriptor;
+  });
+  t.mock.method(fs, "readFileSync", (filePath, ...args) => {
+    const content = originalRead(filePath, ...args);
+    if (indexDescriptors.has(filePath)) {
+      indexReads += 1;
+      if (indexReads === 2) {
+        return Buffer.concat([content, Buffer.from("changed")]);
+      }
+    }
+    return content;
+  });
+
+  assert.throws(
+    () => captureStagedTarget(tempDir, file),
+    (error) => error.code === "ERR_FIX_STATE_CHANGED",
   );
 });
 

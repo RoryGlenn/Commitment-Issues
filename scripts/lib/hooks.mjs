@@ -69,6 +69,480 @@ export function prepareRepairCommands() {
   ];
 }
 
+/**
+ * Enumerate current and historical prepare commands that this package owns.
+ *
+ * @returns {string[]} Exact generated repair commands.
+ */
+export function recognizedPrepareRepairCommands() {
+  return [
+    ...prepareRepairCommands(),
+    `${BIN} doctor --quiet`,
+    ...HOOK_MANAGERS.map(
+      (manager) => `${BIN} doctor --quiet --integration=${manager}`,
+    ),
+  ];
+}
+
+function splitTrailingWhitespace(script) {
+  const trailingWhitespace = script.match(/\s*$/u)[0];
+  return {
+    body: script.slice(0, script.length - trailingWhitespace.length),
+    trailingWhitespace,
+  };
+}
+
+function startsShellComment(script, index) {
+  if (script[index] !== "#") {
+    return false;
+  }
+  const previous = script[index - 1];
+  return (
+    previous === undefined ||
+    /\s/u.test(previous) ||
+    [";", "&", "|", "(", ")"].includes(previous)
+  );
+}
+
+function analyzeProjectPrepare(script) {
+  if (typeof script !== "string") {
+    return {
+      safe: false,
+      ending: "invalid",
+      reason: "scripts.prepare is not a string",
+    };
+  }
+
+  const { body } = splitTrailingWhitespace(script);
+  if (!body) {
+    return {
+      safe: false,
+      ending: "empty",
+      reason: "scripts.prepare has no project command to preserve",
+    };
+  }
+
+  let mode = null;
+  let escaped = false;
+  let comment = false;
+  let parenthesisDepth = 0;
+  let lastToken = null;
+
+  for (let index = 0; index < body.length; index += 1) {
+    const character = body[index];
+    if (comment) {
+      if (character === "\n") {
+        comment = false;
+      }
+      continue;
+    }
+    if (mode === "'") {
+      if (character === "'") {
+        mode = null;
+      }
+      continue;
+    }
+    if (mode === '"' || mode === "`") {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === mode) {
+        mode = null;
+      }
+      continue;
+    }
+    if (escaped) {
+      escaped = false;
+      if (!/\s/u.test(character) && parenthesisDepth === 0) {
+        lastToken = "command";
+      }
+      continue;
+    }
+    if (character === "\\") {
+      escaped = true;
+      if (parenthesisDepth === 0) {
+        lastToken = "command";
+      }
+      continue;
+    }
+    if (["'", '"', "`"].includes(character)) {
+      mode = character;
+      if (parenthesisDepth === 0) {
+        lastToken = "command";
+      }
+      continue;
+    }
+    if (startsShellComment(body, index)) {
+      comment = true;
+      continue;
+    }
+    if (character === "(") {
+      parenthesisDepth += 1;
+      if (parenthesisDepth === 1) {
+        lastToken = "command";
+      }
+      continue;
+    }
+    if (character === ")") {
+      if (parenthesisDepth === 0) {
+        return {
+          safe: false,
+          ending: "invalid",
+          reason: "scripts.prepare has unbalanced parentheses",
+        };
+      }
+      parenthesisDepth -= 1;
+      if (parenthesisDepth === 0) {
+        lastToken = "command";
+      }
+      continue;
+    }
+    if (parenthesisDepth > 0 || /\s/u.test(character)) {
+      continue;
+    }
+    if (character === "&") {
+      if (body[index + 1] === "&") {
+        lastToken = "&&";
+        index += 1;
+      } else {
+        lastToken = "&";
+      }
+      continue;
+    }
+    if (character === "|") {
+      if (body[index + 1] === "|") {
+        lastToken = "||";
+        index += 1;
+      } else {
+        lastToken = "|";
+      }
+      continue;
+    }
+    if (character === ";") {
+      if (body[index + 1] === ";") {
+        lastToken = ";;";
+        index += 1;
+      } else {
+        lastToken = ";";
+      }
+      continue;
+    }
+    lastToken = "command";
+  }
+
+  if (mode) {
+    return {
+      safe: false,
+      ending: "invalid",
+      reason: "scripts.prepare contains an unterminated quote",
+    };
+  }
+  if (escaped) {
+    return {
+      safe: false,
+      ending: "invalid",
+      reason: "scripts.prepare ends with an unfinished escape",
+    };
+  }
+  if (comment) {
+    return {
+      safe: false,
+      ending: "invalid",
+      reason: "scripts.prepare ends inside a shell comment",
+    };
+  }
+  if (parenthesisDepth !== 0) {
+    return {
+      safe: false,
+      ending: "invalid",
+      reason: "scripts.prepare has unbalanced parentheses",
+    };
+  }
+  if (["&&", "||", "|", ";;"].includes(lastToken)) {
+    return {
+      safe: false,
+      ending: "operator",
+      reason: `scripts.prepare ends with the incomplete operator ${lastToken}`,
+    };
+  }
+  if (lastToken === ";") {
+    return { safe: true, ending: "semicolon", reason: null };
+  }
+  if (lastToken === "&") {
+    return { safe: true, ending: "background", reason: null };
+  }
+  return { safe: true, ending: "command", reason: null };
+}
+
+/**
+ * Compose a repair after a project-owned prepare script without creating a
+ * dangling shell operator. The returned project script can be recovered
+ * exactly by inspectPrepareRepairScript().
+ *
+ * @param {string} projectScript - Existing project-owned prepare command.
+ * @param {string} repairCommand - Exact generated repair command.
+ * @returns {{status: "composed", script: string, composition: string} | {status: "unsafe", script: null, composition: null, reason: string}}
+ */
+export function composePrepareRepair(projectScript, repairCommand) {
+  if (typeof projectScript === "string" && projectScript.trim() === "") {
+    return {
+      status: "composed",
+      script: repairCommand,
+      composition: "standalone",
+    };
+  }
+
+  const analysis = analyzeProjectPrepare(projectScript);
+  if (!analysis.safe) {
+    return {
+      status: "unsafe",
+      script: null,
+      composition: null,
+      reason: analysis.reason,
+    };
+  }
+
+  const { body, trailingWhitespace } = splitTrailingWhitespace(projectScript);
+  if (analysis.ending === "semicolon") {
+    return {
+      status: "composed",
+      script: `${body.slice(0, -1)} && ${repairCommand};${trailingWhitespace}`,
+      composition: "semicolon",
+    };
+  }
+  if (analysis.ending === "background") {
+    return {
+      status: "composed",
+      script: `${body.slice(0, -1)}& ${repairCommand}${trailingWhitespace}`,
+      composition: "background",
+    };
+  }
+  return {
+    status: "composed",
+    script: `${body} && ${repairCommand}${trailingWhitespace}`,
+    composition: "and",
+  };
+}
+
+function commandPosition(script, index) {
+  let cursor = index - 1;
+  while (cursor >= 0 && /[ \t\r]/u.test(script[cursor])) {
+    cursor -= 1;
+  }
+  if (cursor < 0) {
+    return true;
+  }
+  return ["\n", ";", "&", "|", "("].includes(script[cursor]);
+}
+
+function commandBoundary(script, index) {
+  const character = script[index];
+  return (
+    character === undefined ||
+    /\s/u.test(character) ||
+    [";", "&", "|", ")"].includes(character)
+  );
+}
+
+function topLevelRepairOccurrences(script) {
+  const commands = recognizedPrepareRepairCommands().sort(
+    (left, right) => right.length - left.length,
+  );
+  const occurrences = [];
+  let mode = null;
+  let escaped = false;
+  let comment = false;
+
+  for (let index = 0; index < script.length; index += 1) {
+    const character = script[index];
+    if (comment) {
+      if (character === "\n") {
+        comment = false;
+      }
+      continue;
+    }
+    if (mode === "'") {
+      if (character === "'") {
+        mode = null;
+      }
+      continue;
+    }
+    if (mode === '"' || mode === "`") {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === mode) {
+        mode = null;
+      }
+      continue;
+    }
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (["'", '"', "`"].includes(character)) {
+      mode = character;
+      continue;
+    }
+    if (startsShellComment(script, index)) {
+      comment = true;
+      continue;
+    }
+
+    const command = commands.find(
+      (candidate) =>
+        script.startsWith(candidate, index) &&
+        commandPosition(script, index) &&
+        commandBoundary(script, index + candidate.length),
+    );
+    if (!command) {
+      continue;
+    }
+    occurrences.push({
+      command,
+      start: index,
+      end: index + command.length,
+    });
+    index += command.length - 1;
+  }
+  return occurrences;
+}
+
+/**
+ * Classify exact generated ownership inside a consumer prepare script.
+ *
+ * Exact terminal forms are removable and preserve their project-owned prefix.
+ * A recognized command elsewhere is ambiguous and must not be mutated.
+ *
+ * @param {unknown} script - package.json scripts.prepare value.
+ * @returns {{status: "absent" | "project" | "owned" | "invalid" | "ambiguous", command: string | null, projectScript: string | null, composition: string | null, reason: string | null}}
+ */
+export function inspectPrepareRepairScript(script) {
+  if (script === undefined || script === null || script === "") {
+    return {
+      status: "absent",
+      command: null,
+      projectScript: null,
+      composition: null,
+      reason: null,
+    };
+  }
+  if (typeof script !== "string") {
+    return {
+      status: "ambiguous",
+      command: null,
+      projectScript: null,
+      composition: null,
+      reason: "scripts.prepare is not a string",
+    };
+  }
+
+  const occurrences = topLevelRepairOccurrences(script);
+  if (occurrences.length === 0) {
+    return {
+      status: "project",
+      command: null,
+      projectScript: script,
+      composition: null,
+      reason: null,
+    };
+  }
+  if (occurrences.length !== 1) {
+    return {
+      status: "ambiguous",
+      command: null,
+      projectScript: null,
+      composition: null,
+      reason:
+        "multiple recognized Commitment Issues repair commands are present",
+    };
+  }
+
+  const occurrence = occurrences[0];
+  const { body, trailingWhitespace } = splitTrailingWhitespace(script);
+  if (
+    body === occurrence.command &&
+    occurrence.start === 0 &&
+    occurrence.end === body.length
+  ) {
+    return {
+      status: "owned",
+      command: occurrence.command,
+      projectScript: null,
+      composition: "standalone",
+      reason: null,
+    };
+  }
+
+  const andMarker = ` && ${occurrence.command}`;
+  if (
+    body.endsWith(andMarker) &&
+    occurrence.start === body.length - occurrence.command.length
+  ) {
+    const projectScript = body.slice(0, -andMarker.length) + trailingWhitespace;
+    const analysis = analyzeProjectPrepare(projectScript);
+    return {
+      status:
+        analysis.safe && analysis.ending === "command" ? "owned" : "invalid",
+      command: occurrence.command,
+      projectScript,
+      composition: "and",
+      reason:
+        analysis.safe && analysis.ending !== "command"
+          ? `the historical repair suffix follows a trailing ${analysis.ending} operator`
+          : analysis.reason,
+    };
+  }
+
+  const semicolonMarker = ` && ${occurrence.command};`;
+  if (body.endsWith(semicolonMarker) && occurrence.end === body.length - 1) {
+    const projectScript =
+      `${body.slice(0, -semicolonMarker.length)};` + trailingWhitespace;
+    const analysis = analyzeProjectPrepare(projectScript);
+    return {
+      status:
+        analysis.safe && analysis.ending === "semicolon" ? "owned" : "invalid",
+      command: occurrence.command,
+      projectScript,
+      composition: "semicolon",
+      reason: analysis.reason,
+    };
+  }
+
+  const backgroundMarker = `& ${occurrence.command}`;
+  if (
+    body.endsWith(backgroundMarker) &&
+    occurrence.start === body.length - occurrence.command.length
+  ) {
+    const projectScript =
+      `${body.slice(0, -backgroundMarker.length)}&` + trailingWhitespace;
+    const analysis = analyzeProjectPrepare(projectScript);
+    return {
+      status:
+        analysis.safe && analysis.ending === "background" ? "owned" : "invalid",
+      command: occurrence.command,
+      projectScript,
+      composition: "background",
+      reason: analysis.reason,
+    };
+  }
+
+  return {
+    status: "ambiguous",
+    command: occurrence.command,
+    projectScript: null,
+    composition: null,
+    reason:
+      "a recognized Commitment Issues repair command is not in an exact generated terminal position",
+  };
+}
+
 const LOCAL_BIN = `node_modules/.bin/${BIN}`;
 const LEFTHOOK_FILES_SCRIPT = `node_modules/${BIN}/scripts/lefthook-files.mjs`;
 const LEFTHOOK_FILES_COMMAND = `node -- ${LEFTHOOK_FILES_SCRIPT}`;

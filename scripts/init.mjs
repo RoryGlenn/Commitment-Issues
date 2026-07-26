@@ -17,6 +17,8 @@ import {
   hookManagerSnippets,
   hookNamesForConfig,
   hooksPathConfigState,
+  composePrepareRepair,
+  inspectPrepareRepairScript,
   inspectHookManager,
   inspectHookManagerRunner,
   isHuskyHooksPath,
@@ -24,7 +26,6 @@ import {
   leftoverHuskyHooks,
   legacyHuskyWiringPaths,
   prepareRepairCommand,
-  prepareRepairCommands,
   removeLegacyHuskyWiring,
   writeHook,
 } from "./lib/hooks.mjs";
@@ -247,56 +248,77 @@ pkg.scripts ??= {};
 
 // `doctor --quiet` re-establishes hook wiring after every fresh clone or
 // reinstall. Compose it after a project-owned `prepare` command because Yarn
-// Classic does not run `postprepare`. The exact suffix is idempotent and can be
-// removed safely by uninstall without disturbing the project command.
+// Classic does not run `postprepare`. Shared structural analysis preserves
+// project-owned behavior, recognizes historical generated forms, and refuses
+// an ambiguous edit before any project file or hook is changed.
 const desiredRepair = prepareRepairCommand(integrationManager);
-const repairSuffix = ` && ${desiredRepair}`;
 const legacyPrepare = [
   "husky",
   "husky || true",
   "husky install",
   "node scripts/doctor.mjs --quiet",
 ];
-const directRepairCommands = [
-  `${BIN} doctor --quiet`,
-  ...HOOK_MANAGERS.map(
-    (manager) => `${BIN} doctor --quiet --integration=${manager}`,
-  ),
-];
-const ownedRepairCommands = [
-  ...prepareRepairCommands(),
-  ...directRepairCommands,
-];
-const ownedRepairSuffixes = ownedRepairCommands.map(
-  (command) => ` && ${command}`,
-);
-const currentRepairSuffix = ownedRepairSuffixes.find((suffix) =>
-  pkg.scripts.prepare?.endsWith(suffix),
-);
-const currentRepairPrefix = currentRepairSuffix
-  ? pkg.scripts.prepare.slice(0, -currentRepairSuffix.length)
-  : null;
+
+function refusePrepareComposition(reason, { ambiguous = false } = {}) {
+  errorBox([
+    pc.bold(
+      ambiguous
+        ? "Ambiguous package.json prepare repair."
+        : "Unsafe package.json prepare composition.",
+    ),
+    "",
+    pc.dim(`${escapeTerminalText(reason)}.`),
+    pc.dim(
+      ambiguous
+        ? "Remove only the displaced Commitment Issues repair command from scripts.prepare, keep every project-owned command, then run init again."
+        : "Make scripts.prepare one complete command without an unfinished operator, quote, escape, or trailing comment, then run init again.",
+    ),
+    pc.dim("No files or hooks were changed."),
+  ]);
+  process.exit(1);
+}
+
+const prepareState = inspectPrepareRepairScript(pkg.scripts.prepare);
+if (prepareState.status === "ambiguous") {
+  refusePrepareComposition(prepareState.reason, { ambiguous: true });
+}
+const currentProjectPrepare = ["owned", "invalid"].includes(prepareState.status)
+  ? prepareState.projectScript
+  : pkg.scripts.prepare;
 const retiringLegacyPrepare =
   !integrationManager &&
   (legacyPrepare.includes(pkg.scripts.prepare) ||
-    legacyPrepare.includes(currentRepairPrefix));
+    legacyPrepare.includes(currentProjectPrepare));
 if (retiringLegacyPrepare) {
   pkg.scripts.prepare = desiredRepair;
   created.push("script prepare");
-} else if (ownedRepairCommands.includes(pkg.scripts.prepare)) {
-  if (pkg.scripts.prepare !== desiredRepair) {
-    pkg.scripts.prepare = desiredRepair;
+} else if (prepareState.status === "owned") {
+  if (prepareState.command !== desiredRepair) {
+    if (prepareState.projectScript === null) {
+      pkg.scripts.prepare = desiredRepair;
+    } else {
+      const composition = composePrepareRepair(
+        prepareState.projectScript,
+        desiredRepair,
+      );
+      pkg.scripts.prepare = composition.script;
+    }
     created.push("script prepare integration");
   }
-} else if (pkg.scripts.prepare !== desiredRepair) {
-  if (!pkg.scripts.prepare) {
+} else {
+  const projectPrepare =
+    prepareState.status === "invalid"
+      ? prepareState.projectScript
+      : pkg.scripts.prepare;
+  if (!projectPrepare) {
     pkg.scripts.prepare = desiredRepair;
     created.push("script prepare");
-  } else if (currentRepairSuffix && currentRepairSuffix !== repairSuffix) {
-    pkg.scripts.prepare = `${pkg.scripts.prepare.slice(0, -currentRepairSuffix.length)}${repairSuffix}`;
-    created.push("script prepare integration");
-  } else if (!pkg.scripts.prepare.endsWith(repairSuffix)) {
-    pkg.scripts.prepare += repairSuffix;
+  } else {
+    const composition = composePrepareRepair(projectPrepare, desiredRepair);
+    if (composition.status === "unsafe") {
+      refusePrepareComposition(composition.reason);
+    }
+    pkg.scripts.prepare = composition.script;
     created.push("script prepare repair");
   }
 }

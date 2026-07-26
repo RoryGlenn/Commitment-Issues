@@ -113,6 +113,16 @@ stderr line or, when `--json` was requested, a structured JSON diagnostic.
 `The --integration option may be supplied only once.` is the corresponding
 owner-selection cardinality error.
 
+### Prepare composition refusal
+
+`Unsafe package.json prepare composition.` means the project-owned command ends
+with incomplete shell syntax, so `init` cannot add repair without guessing.
+`Ambiguous package.json prepare repair.` means a recognized generated repair
+was moved away from its terminal position or duplicated. Init and uninstall
+both stop before changing any file or hook; the latter never prints a
+setup-removed claim. The box asks the user to retain every project command,
+remove only a displaced repair when applicable, and rerun the command.
+
 ### Hook-manager owner selection
 
 `Could not choose a hook-manager owner safely.` is shown by doctor when bare
@@ -994,6 +1004,15 @@ approximately.
 </p>
 
 Shown when `doctor` finds the hook wiring already correct.
+
+### Install-time repair composition
+
+`The install-time repair is not healthy.` reports an exact historical
+composition that `init` can rewrite safely. `The install-time repair is
+ambiguous.` reports a displaced or duplicate generated repair that needs
+manual cleanup. Both interactive states exit nonzero before hook repair and
+never print the healthy claim. Quiet mode instead emits one bounded warning
+line and exits zero so package installation remains usable.
 
 ### Repaired hooks
 

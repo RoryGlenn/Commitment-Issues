@@ -73,13 +73,21 @@ Push pure logic **down into `scripts/lib/`** so it can be unit-tested directly; 
 ### `hooks.mjs`
 
 - `prepareRepairCommand(...)` and `prepareRepairCommands()` own the exact
-  consumer `prepare` guard. Keep it Node-only and project-local: an absent
+  consumer `prepare` guard. `composePrepareRepair(...)` is the only supported
+  composition path, and `inspectPrepareRepairScript(...)` is the shared
+  init/doctor/uninstall ownership boundary. Do not append a raw `&&` suffix:
+  preserve terminal semicolons, single `&` operators, trailing whitespace,
+  quoting, and multiline project logic; refuse incomplete syntax. Only one
+  recognized top-level repair in an exact generated terminal position is
+  mutable. A displaced or duplicate repair must stop before every project or
+  hook mutation with manual-cleanup guidance.
+- Keep the guard Node-only and project-local: an absent
   `node_modules/commitment-issues/package.json` is the intentional production
   no-op, while a present package must import its exact CLI and preserve errors.
   Never replace the guard with `npx`, a package-manager runner, `PATH`, global,
-  ancestor-package, or network resolution. Keep init migration, uninstall
-  recognition, packed production lifecycle coverage, and canonical
-  compatibility docs synchronized.
+  ancestor-package, or network resolution. Keep init migration, doctor health,
+  uninstall recognition, focused round-trip tests, packed production lifecycle
+  coverage, and canonical compatibility docs synchronized.
 
 ### `fix-safety.mjs`
 

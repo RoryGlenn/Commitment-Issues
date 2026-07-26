@@ -9,6 +9,7 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import {
   classifyHook,
+  composePrepareRepair,
   detectHookManagers,
   effectiveHooksDir,
   gitWorkTreeState,
@@ -27,11 +28,13 @@ import {
   inspectHookManager,
   inspectHookManagerForCleanup,
   inspectHookManagerRunner,
+  inspectPrepareRepairScript,
   legacyHuskyDirectoryState,
   legacyHuskyWiringPaths,
   leftoverHuskyHooks,
   prepareRepairCommand,
   prepareRepairCommands,
+  recognizedPrepareRepairCommands,
   removeLegacyHuskyWiring,
   writeHook,
 } from "../scripts/lib/hooks.mjs";
@@ -140,6 +143,221 @@ test("prepare repair commands invoke only the installed project package", (t) =>
   );
   assert.notEqual(corrupt.status, 0);
   assert.match(corrupt.stderr, /ERR_MODULE_NOT_FOUND/u);
+});
+
+test("prepare repair composition preserves safe project syntax and ownership", () => {
+  const repair = prepareRepairCommand();
+  const cases = [
+    {
+      project: "node --version",
+      expected: `node --version && ${repair}`,
+      composition: "and",
+    },
+    {
+      project: "node --version \t\n",
+      expected: `node --version && ${repair} \t\n`,
+      composition: "and",
+    },
+    {
+      project: "node --version; \n",
+      expected: `node --version && ${repair}; \n`,
+      composition: "semicolon",
+    },
+    {
+      project: "node --version;\r\n",
+      expected: `node --version && ${repair};\r\n`,
+      composition: "semicolon",
+    },
+    {
+      project: "node --version &\t",
+      expected: `node --version & ${repair}\t`,
+      composition: "background",
+    },
+    {
+      project: `node -e "console.log('; && | &')"`,
+      expected: `node -e "console.log('; && | &')" && ${repair}`,
+      composition: "and",
+    },
+    {
+      project: `node -e "console.log(\\"safe\\")"`,
+      expected: `node -e "console.log(\\"safe\\")" && ${repair}`,
+      composition: "and",
+    },
+    {
+      project: "echo 'single ; && | &'",
+      expected: `echo 'single ; && | &' && ${repair}`,
+      composition: "and",
+    },
+    {
+      project: "echo `printf safe`",
+      expected: `echo \`printf safe\` && ${repair}`,
+      composition: "and",
+    },
+    {
+      project: "echo escaped\\ value",
+      expected: `echo escaped\\ value && ${repair}`,
+      composition: "and",
+    },
+    {
+      project: "echo escaped\\#value",
+      expected: `echo escaped\\#value && ${repair}`,
+      composition: "and",
+    },
+    {
+      project: "# first line\nnode --version",
+      expected: `# first line\nnode --version && ${repair}`,
+      composition: "and",
+    },
+    {
+      project: "node --version;# second line\nnode --version",
+      expected: `node --version;# second line\nnode --version && ${repair}`,
+      composition: "and",
+    },
+    {
+      project: "(node --version)",
+      expected: `(node --version) && ${repair}`,
+      composition: "and",
+    },
+    {
+      project: "node --version;\nnode --version\n",
+      expected: `node --version;\nnode --version && ${repair}\n`,
+      composition: "and",
+    },
+  ];
+
+  for (const fixture of cases) {
+    const composed = composePrepareRepair(fixture.project, repair);
+    assert.deepEqual(composed, {
+      status: "composed",
+      script: fixture.expected,
+      composition: fixture.composition,
+    });
+    assert.deepEqual(inspectPrepareRepairScript(composed.script), {
+      status: "owned",
+      command: repair,
+      projectScript: fixture.project,
+      composition: fixture.composition,
+      reason: null,
+    });
+  }
+
+  assert.deepEqual(composePrepareRepair(" \n", repair), {
+    status: "composed",
+    script: repair,
+    composition: "standalone",
+  });
+  assert.deepEqual(composePrepareRepair(42, repair), {
+    status: "unsafe",
+    script: null,
+    composition: null,
+    reason: "scripts.prepare is not a string",
+  });
+});
+
+test("prepare repair analysis refuses incomplete or ambiguous shell edits", () => {
+  const repair = prepareRepairCommand();
+  for (const project of [
+    "node --version &&",
+    "node --version ||",
+    "node --version |",
+    "node --version ;;",
+    'node -e "unterminated',
+    "node --version \\",
+    "node --version # trailing comment",
+    "(node --version)# trailing comment",
+    "(node --version",
+    "node --version)",
+  ]) {
+    const result = composePrepareRepair(project, repair);
+    assert.equal(result.status, "unsafe", project);
+    assert.equal(result.script, null);
+    assert.match(result.reason, /scripts\.prepare/u);
+  }
+
+  const historicalBroken = `node --version; && ${repair}`;
+  assert.deepEqual(inspectPrepareRepairScript(historicalBroken), {
+    status: "invalid",
+    command: repair,
+    projectScript: "node --version;",
+    composition: "and",
+    reason:
+      "the historical repair suffix follows a trailing semicolon operator",
+  });
+  assert.deepEqual(
+    inspectPrepareRepairScript(`node --version & && ${repair}`),
+    {
+      status: "invalid",
+      command: repair,
+      projectScript: "node --version &",
+      composition: "and",
+      reason:
+        "the historical repair suffix follows a trailing background operator",
+    },
+  );
+  assert.deepEqual(inspectPrepareRepairScript(` && ${repair}`), {
+    status: "invalid",
+    command: repair,
+    projectScript: "",
+    composition: "and",
+    reason: "scripts.prepare has no project command to preserve",
+  });
+  assert.equal(
+    inspectPrepareRepairScript(`node --version) && ${repair};`).status,
+    "invalid",
+  );
+  assert.equal(
+    inspectPrepareRepairScript(`node --version)& ${repair}`).status,
+    "invalid",
+  );
+
+  const displaced = `node --version && ${repair} && node --version`;
+  assert.deepEqual(inspectPrepareRepairScript(displaced), {
+    status: "ambiguous",
+    command: repair,
+    projectScript: null,
+    composition: null,
+    reason:
+      "a recognized Commitment Issues repair command is not in an exact generated terminal position",
+  });
+  assert.equal(
+    inspectPrepareRepairScript(
+      `${repair} && node --version && ${prepareRepairCommand("husky")}`,
+    ).status,
+    "ambiguous",
+  );
+
+  for (const projectMention of [
+    'echo "commitment-issues doctor --quiet"',
+    "echo 'commitment-issues doctor --quiet'",
+    "echo `commitment-issues doctor --quiet`",
+    "echo commitment-issues doctor --quiet",
+    "echo commitment-issues\\ doctor --quiet",
+    "commitment-issues doctor --quietly",
+  ]) {
+    assert.deepEqual(inspectPrepareRepairScript(projectMention), {
+      status: "project",
+      command: null,
+      projectScript: projectMention,
+      composition: null,
+      reason: null,
+    });
+  }
+  assert.equal(inspectPrepareRepairScript(`(${repair})`).status, "ambiguous");
+  assert.deepEqual(inspectPrepareRepairScript(42), {
+    status: "ambiguous",
+    command: null,
+    projectScript: null,
+    composition: null,
+    reason: "scripts.prepare is not a string",
+  });
+
+  assert.deepEqual(recognizedPrepareRepairCommands(), [
+    ...prepareRepairCommands(),
+    "commitment-issues doctor --quiet",
+    "commitment-issues doctor --quiet --integration=husky",
+    "commitment-issues doctor --quiet --integration=lefthook",
+    "commitment-issues doctor --quiet --integration=pre-commit",
+  ]);
 });
 
 test("Lefthook files producer emits only the fixed package sentinel", (t) => {

@@ -732,6 +732,13 @@ production-readiness workstream #130 is consolidated in the
   `survive production install and direct dependency removal` in
   `test/integration/helpers/lifecycle-fixture.mjs`; CI lifecycle matrix:
   `.github/workflows/ci.yml`.
+- **LIFE-010** — init composes a project-owned `prepare` across terminal
+  semicolons, single `&` operators, trailing whitespace, quoting, and multiline
+  commands; uninstall restores the original bytes. Exact historical malformed
+  suffixes are repairable/removable, while incomplete syntax and displaced or
+  duplicate repairs make init, doctor, and uninstall refuse mutation.
+  Unit/subprocess: `test/hooks.test.mjs`, `test/init.test.mjs`,
+  `test/doctor.test.mjs`, and `test/uninstall.test.mjs`.
 
 ### Package managers
 

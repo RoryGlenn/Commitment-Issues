@@ -8,7 +8,6 @@ import pc from "picocolors";
 import { infoBox, successBox, warningBox, errorBox } from "./lib/ui.mjs";
 import {
   BIN,
-  HOOK_MANAGERS,
   HOOK_NAMES,
   classifyHook,
   detectHookManagers,
@@ -16,10 +15,10 @@ import {
   gitWorkTreeState,
   gitHooksDir,
   hooksPathConfigState,
+  inspectPrepareRepairScript,
   isHuskyHooksPath,
   inspectHookManagerForCleanup,
   legacyHuskyDirectoryState,
-  prepareRepairCommands,
 } from "./lib/hooks.mjs";
 import { removeCommand } from "./lib/package-manager.mjs";
 import {
@@ -121,42 +120,46 @@ if (standalone.error) {
   process.exit(1);
 }
 
-const currentRepairCommands = prepareRepairCommands();
-const directRepairCommands = [
-  `${BIN} doctor --quiet`,
-  ...HOOK_MANAGERS.map(
-    (manager) => `${BIN} doctor --quiet --integration=${manager}`,
-  ),
-];
+const prepareState = inspectPrepareRepairScript(pkg.scripts?.prepare);
+if (prepareState.status === "ambiguous") {
+  errorBox([
+    pc.bold("Ambiguous package.json prepare repair."),
+    "",
+    pc.dim(`${escapeTerminalText(prepareState.reason)}.`),
+    pc.dim(
+      "Remove only the displaced Commitment Issues repair command from scripts.prepare and keep every project-owned command.",
+    ),
+    pc.dim("Then run uninstall again. No files or hooks were changed."),
+  ]);
+  process.exit(1);
+}
+
 const managedScripts = {
-  prepare: [
-    ...currentRepairCommands,
-    ...directRepairCommands,
-    "node scripts/doctor.mjs --quiet",
-  ],
+  prepare: ["node scripts/doctor.mjs --quiet"],
   postprepare: [`${BIN} doctor --quiet`, "node scripts/doctor.mjs --quiet"],
   "commit:fix": [`${BIN} commit-fix`, "node scripts/commit-fix.mjs"],
   "fix:staged": [`${BIN} fix-staged`, "node scripts/fix-staged.mjs"],
   "test:precommit": [`${BIN} precommit`, "node scripts/precommit-unified.mjs"],
   doctor: [`${BIN} doctor`, "node scripts/doctor.mjs"],
 };
-const repairSuffixes = [
-  ...currentRepairCommands.map((command) => ` && ${command}`),
-  ...directRepairCommands.map((command) => ` && ${command}`),
-];
 
 const plannedPackageChanges = [];
+if (["owned", "invalid"].includes(prepareState.status)) {
+  if (prepareState.projectScript === null) {
+    delete pkg.scripts.prepare;
+  } else {
+    pkg.scripts.prepare = prepareState.projectScript;
+  }
+  plannedPackageChanges.push(
+    prepareState.composition === "standalone"
+      ? "package.json script prepare"
+      : "package.json prepare repair",
+  );
+}
 for (const [name, values] of Object.entries(managedScripts)) {
   if (values.includes(pkg.scripts?.[name])) {
     delete pkg.scripts[name];
     plannedPackageChanges.push(`package.json script ${name}`);
-  }
-}
-for (const repairSuffix of repairSuffixes) {
-  if (pkg.scripts?.prepare?.endsWith(repairSuffix)) {
-    pkg.scripts.prepare = pkg.scripts.prepare.slice(0, -repairSuffix.length);
-    plannedPackageChanges.push("package.json prepare repair");
-    break;
   }
 }
 

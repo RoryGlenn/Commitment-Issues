@@ -197,7 +197,7 @@ clean installed copy. When shipped documentation needs repository-only policy,
 planning, or audit evidence, use its canonical GitHub URL rather than expanding
 the npm package solely to make the link resolve.
 
-The tarball must remain at or below **350 KiB compressed** and **833 KiB
+The tarball must remain at or below **350 KiB compressed** and **850 KiB
 unpacked**. Tests fail when the budget is exceeded, required runtime or
 user-documentation files are missing, maintenance tooling or internal evidence
 enters the tarball, or promotional media is included. Do not raise the limits
@@ -219,7 +219,10 @@ documentation add 10,037 measured unpacked bytes. The compressed ceiling again
 did not need to change. It increased from 827 to 833 KiB for issue #311's
 production-safe prepare guard, whose runtime, changelog, and shipped lifecycle
 documentation add 5,490 measured unpacked bytes. The compressed ceiling again
-did not need to change.
+did not need to change. It increased from 833 to 850 KiB for issue #312's
+ownership-preserving prepare composition, whose runtime, changelog, and shipped
+lifecycle documentation add 18,405 measured unpacked bytes. The exact package
+is 869,779 bytes unpacked; the compressed ceiling again did not need to change.
 
 ## Release candidate identity
 

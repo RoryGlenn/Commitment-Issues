@@ -13,10 +13,12 @@ import {
   createTempRepo,
   fakeGitEnv,
   installBlockingPrettierFixture,
+  installInterruptedFixerFixture,
   installInterruptibleProcessFixture,
   readFile,
   run,
   runAsync,
+  setPrecommitConfig,
   waitForCompletion,
   waitForPath,
   writeFile,
@@ -180,6 +182,53 @@ test(
     );
   },
 );
+
+test("fix-staged reports truncate-then-timeout targets without staging them", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  setPrecommitConfig(tempDir, { timeoutMs: 1200, tone: "fun" });
+  const files = ["src/first.js", "src/second.js"];
+  const originals = new Map([
+    [files[0], "export const first = 1;\n"],
+    [files[1], "export const second = 2;\n"],
+  ]);
+  for (const [file, content] of originals) {
+    writeFile(path.join(tempDir, file), content);
+  }
+  run("git", ["add", "--", ...files], tempDir);
+  const fixture = installInterruptedFixerFixture(tempDir, {
+    interruptTool: "eslint",
+    partialContent: "export const partial =",
+  });
+  const repositoryBefore = captureFixState(tempDir, []);
+  const objectsBefore = run("git", ["count-objects", "-v"], tempDir).stdout;
+
+  const result = runFixStaged(tempDir, { env: fixture.env });
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 1);
+  assert.match(output, /fixer left the makeover halfway through/i);
+  assert.match(output, /ESLint timed out/);
+  assert.match(output, /No interrupted output was staged/);
+  for (const file of files) {
+    assert.match(output, new RegExp(file.replace(".", "\\.")));
+    assert.equal(readFile(tempDir, file), "export const partial =");
+    assert.equal(
+      run("git", ["show", `:${file}`], tempDir).stdout,
+      originals.get(file),
+    );
+  }
+  assert.deepEqual(captureFixState(tempDir, []), repositoryBefore);
+  assert.equal(
+    run("git", ["count-objects", "-v"], tempDir).stdout,
+    objectsBefore,
+  );
+  assert.equal(fs.readFileSync(fixture.cacheFile, "utf8"), "cache-before\n");
+  const phases = new Set(
+    fs.readFileSync(fixture.phaseLog, "utf8").trim().split("\n"),
+  );
+  assert.deepEqual(phases, new Set(files.map((file) => `eslint:${file}`)));
+});
 
 test("surfaces the detected package manager in command hints", (t) => {
   const tempDir = createTempRepo();

@@ -667,6 +667,17 @@ Shown when the repository has no commit yet (or HEAD cannot be resolved).
 
 Shown when the latest commit contains no files the staged fixers handle.
 
+### Fixer interrupted before amend
+
+Shown when ESLint or Prettier times out, stops on a signal, cannot start, or is
+missing locally. `commit:fix` discards incomplete output and stops before later
+tool phases, staging, or amend. The box confirms that the index and `HEAD`
+remain unchanged. If the interrupted process changed or invalidated a captured
+target, every affected path is listed and left untouched for manual review.
+
+The fun-tone title is `A fixer left the makeover halfway through`; the same
+index, history, affected-path, and retry details remain visible.
+
 ### Repository changed during commit fix
 
 <p>
@@ -787,6 +798,16 @@ ambiguous bytes are staged; the concurrent state remains available in
 The fun-tone title is
 `The repository changed the relationship status mid-fix`; it says no surprise
 changes were invited into the commit without changing the refusal.
+
+### Fixer interrupted before staging
+
+Shown when a fixer times out, stops on a signal, cannot start, or is missing
+locally. `fix:staged` discards incomplete output, skips later tool phases, and
+does not stage anything from the interrupted run. The exact index and `HEAD`
+remain unchanged. Any captured target changed or made unverifiable by the tool
+is listed exactly and left untouched so concurrent user work is never guessed
+away. The fun-tone title matches the commit-fix interruption state without
+changing its safety details.
 
 ### Fixed output could not be applied safely
 

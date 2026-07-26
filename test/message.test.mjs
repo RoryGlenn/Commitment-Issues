@@ -11,6 +11,7 @@ import {
   buildCommitFixOperationRefusalMessage,
   buildCommitMessageCheckMessage,
   buildConcurrentFixRefusalMessage,
+  buildInterruptedFixRefusalMessage,
   buildPushAllowedMessage,
   plural,
   prepushTestInterruption,
@@ -42,6 +43,112 @@ test("concurrent fixer refusals distinguish staging from amending", () => {
   assert.match(staged.lines.join("\n"), /npm run fix:staged/);
   assert.match(amended.lines.join("\n"), /latest commit was not amended/i);
   assert.match(amended.lines.join("\n"), /npm run commit:fix/);
+});
+
+test("interrupted fixer refusals report exact affected paths and mutation limits", () => {
+  const staged = buildInterruptedFixRefusalMessage({
+    operation: "stage",
+    interruption: {
+      tool: "prettier",
+      file: "src/input.json",
+      outcome: "timeout",
+      signal: null,
+    },
+    affectedFiles: ["src/input.json", "src/other\nfile.json"],
+    rerunCommand: "npm run fix:staged",
+  });
+  const text = stripAnsi(staged.lines.join("\n"));
+
+  assert.equal(staged.severity, "error");
+  assert.match(text, /Automatic fixes were interrupted/);
+  assert.match(text, /Prettier timed out while processing src\/input\.json/);
+  assert.match(text, /No interrupted output was staged/);
+  assert.match(text, /index and HEAD remain unchanged/);
+  assert.match(text, /src\/other\\nfile\.json/);
+  assert.match(text, /left those worktree paths untouched/);
+  assert.match(text, /npm run fix:staged/);
+});
+
+test("interrupted fixer refusals distinguish all process outcomes", () => {
+  const signal = buildInterruptedFixRefusalMessage({
+    operation: "amend",
+    interruption: {
+      tool: "eslint",
+      file: "src/input.js",
+      outcome: "signal",
+      signal: "SIGTERM",
+    },
+    rerunCommand: "npm run commit:fix",
+  });
+  const signalWithoutName = buildInterruptedFixRefusalMessage({
+    operation: "stage",
+    interruption: {
+      tool: "eslint",
+      file: null,
+      outcome: "signal",
+      signal: null,
+    },
+    rerunCommand: "npm run fix:staged",
+  });
+  const spawn = buildInterruptedFixRefusalMessage({
+    operation: "stage",
+    interruption: {
+      tool: "prettier",
+      file: null,
+      outcome: "spawn-error",
+      signal: null,
+    },
+    rerunCommand: "npm run fix:staged",
+  });
+  const missing = buildInterruptedFixRefusalMessage({
+    operation: "amend",
+    interruption: {
+      tool: "eslint",
+      file: null,
+      outcome: "missing-tool",
+      signal: null,
+    },
+    missingTools: ["eslint", "prettier"],
+    installCommand: "npm install -D eslint@^9 prettier@^3",
+    rerunCommand: "npm run commit:fix",
+  });
+  const missingWithoutCommand = buildInterruptedFixRefusalMessage({
+    operation: "stage",
+    interruption: {
+      tool: "eslint",
+      file: null,
+      outcome: "missing-tool",
+      signal: null,
+    },
+    missingTools: ["eslint"],
+    rerunCommand: "npm run fix:staged",
+  });
+
+  assert.match(
+    stripAnsi(signal.lines.join("\n")),
+    /ESLint stopped on a signal \(SIGTERM\).*src\/input\.js/,
+  );
+  assert.match(
+    stripAnsi(signal.lines.join("\n")),
+    /No interrupted output was staged or amended/,
+  );
+  assert.match(
+    stripAnsi(signalWithoutName.lines.join("\n")),
+    /ESLint stopped on a signal\./,
+  );
+  assert.match(stripAnsi(spawn.lines.join("\n")), /Prettier could not start\./);
+  assert.match(
+    stripAnsi(missing.lines.join("\n")),
+    /Missing local tool\(s\): eslint, prettier/,
+  );
+  assert.match(
+    stripAnsi(missing.lines.join("\n")),
+    /npm install -D eslint@\^9 prettier@\^3/,
+  );
+  assert.doesNotMatch(
+    stripAnsi(missingWithoutCommand.lines.join("\n")),
+    /Install them:/,
+  );
 });
 
 test("commit-fix history refusals explain each fail-closed state", () => {

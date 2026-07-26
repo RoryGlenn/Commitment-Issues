@@ -17,6 +17,7 @@ import {
   assertFixSnapshotUnchanged,
   captureFixSnapshot,
   inspectGitOperationState,
+  inspectInterruptedFixState,
   isFixStateChangedError,
   runFixTools,
   stageFixOutputs,
@@ -26,6 +27,7 @@ import {
   buildCommitFixHistoryRefusalMessage,
   buildCommitFixOperationRefusalMessage,
   buildConcurrentFixRefusalMessage,
+  buildInterruptedFixRefusalMessage,
 } from "./lib/message.mjs";
 
 enterWorktreeRoot();
@@ -161,7 +163,7 @@ if (!initialAmendSafety.safe) {
 }
 const initialBranchRef = initialAmendSafety.branchRef;
 
-function assertOnlyExpectedUnstagedChanges(expectedFiles) {
+function currentUnstagedTrackedFiles() {
   const result = run("git", [...GIT_PATH_ARGS, "diff", "--name-only", "-z"]);
   const files = parseNulPaths(result.stdout);
   if (result.error || result.status !== 0 || files === null) {
@@ -170,6 +172,11 @@ function assertOnlyExpectedUnstagedChanges(expectedFiles) {
       "Unable to revalidate the working tree.",
     );
   }
+  return files;
+}
+
+function assertOnlyExpectedUnstagedChanges(expectedFiles) {
+  const files = currentUnstagedTrackedFiles();
   const expected = new Set(expectedFiles);
   if (
     files.length !== expected.size ||
@@ -178,6 +185,17 @@ function assertOnlyExpectedUnstagedChanges(expectedFiles) {
     throw fixerStateError(
       "ERR_FIX_STATE_CHANGED",
       "Tracked worktree changes appeared while fixes were running.",
+    );
+  }
+}
+
+function assertNoUnexpectedUnstagedChanges(allowedFiles) {
+  const files = currentUnstagedTrackedFiles();
+  const allowed = new Set(allowedFiles);
+  if (files.some((file) => !allowed.has(file))) {
+    throw fixerStateError(
+      "ERR_FIX_STATE_CHANGED",
+      "Unexpected tracked worktree changes appeared while fixes were running.",
     );
   }
 }
@@ -318,6 +336,26 @@ try {
   for (const diagnostic of fixResult.diagnostics) {
     process.stderr.write(diagnostic.replace(/\n?$/u, "\n"));
   }
+  if (fixResult.interruption) {
+    const { affectedFiles } = inspectInterruptedFixState(snapshot);
+    assertNoUnexpectedUnstagedChanges(affectedFiles);
+    assertCommitStillAmendable(initialHead, initialBranchRef);
+    assertNoActiveGitOperation();
+    const message = buildInterruptedFixRefusalMessage({
+      operation: "amend",
+      interruption: fixResult.interruption,
+      affectedFiles,
+      missingTools: fixResult.missingTools,
+      installCommand:
+        fixResult.missingTools.length > 0
+          ? devInstallCommand(fixResult.missingTools)
+          : undefined,
+      tone,
+      rerunCommand: runScript("commit:fix"),
+    });
+    errorBox(message.lines);
+    process.exit(1);
+  }
 
   // Bind the mutation to the same clean repository inspected before the tools
   // ran, including non-target tracked files and history-safety state.
@@ -340,15 +378,6 @@ try {
 }
 
 const hasRemainingIssues = fixResult.toolFailed;
-
-if (fixResult.missingTools.length > 0) {
-  console.error(
-    escapeTerminalText(
-      `commitment-issues: missing local tool(s): ${fixResult.missingTools.join(", ")} — ` +
-        `install with \`${devInstallCommand(fixResult.missingTools)}\`.`,
-    ),
-  );
-}
 
 console.log("");
 

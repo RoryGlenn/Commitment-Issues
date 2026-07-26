@@ -237,6 +237,15 @@ made absolute so Node cannot interpret a repository filename as an option.
   clean commit only when `HEAD` stays on one local branch, the commit is
   unsigned, and no local tag or remote-tracking ref contains it.
 
+A timeout, signal, spawn failure, or missing local fixer stops the complete fix
+operation before later tool phases, worktree installation, staging, or amend.
+Incomplete stdout is discarded. The commands verify that the exact index and
+`HEAD` remain unchanged; any target path changed or made unverifiable by the
+interrupted process is listed exactly and left untouched for manual review.
+This fail-closed interruption is distinct from a completed nonzero ESLint run,
+whose attributable fixes may still proceed through Prettier while remaining
+lint findings are reported.
+
 ## TypeScript and mixed projects
 
 - Staged `.ts`, `.tsx`, `.mts`, `.cts`, and `.cjs` files are treated as code files alongside `.js`, `.jsx`, and `.mjs`.

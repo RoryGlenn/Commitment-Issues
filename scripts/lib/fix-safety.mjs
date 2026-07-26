@@ -9,7 +9,7 @@ import {
   readMutableProjectFile,
   writeMutableProjectFile,
 } from "./files.mjs";
-import { run, runTool, toolTimeoutMs } from "./process.mjs";
+import { run, runTool, toolInvocation, toolTimeoutMs } from "./process.mjs";
 
 const GIT_PATH_ARGS = ["-c", "core.quotePath=false"];
 const GIT_OPERATION_MARKERS = [
@@ -478,6 +478,41 @@ export function assertFixSnapshotUnchanged(snapshot) {
   assertFixTargetsUnchanged(snapshot);
 }
 
+/**
+ * Revalidate immutable repository state after a fixer interruption and report
+ * target paths whose exact worktree identities or bytes can no longer be
+ * proven. This inspection never restores or otherwise mutates a target because
+ * an interrupted tool write cannot be distinguished safely from concurrent
+ * user work.
+ * @param {ReturnType<typeof captureFixSnapshot>} snapshot - Bound state.
+ * @returns {{affectedFiles: string[]}} Interrupted target state.
+ */
+export function inspectInterruptedFixState(snapshot) {
+  if (
+    currentHead({ allowUnbornHead: snapshot.allowUnbornHead }) !== snapshot.head
+  ) {
+    throw changedError("HEAD changed while automatic fixes were running.");
+  }
+  if (currentIndexPath() !== snapshot.indexPath) {
+    throw changedError("The active Git index changed.");
+  }
+  assertIndexFileUnchanged(snapshot);
+
+  const affectedFiles = [];
+  for (const target of snapshot.targets) {
+    try {
+      if (
+        !readMutableProjectFile(target.state).equals(target.expectedContent)
+      ) {
+        affectedFiles.push(target.file);
+      }
+    } catch {
+      affectedFiles.push(target.file);
+    }
+  }
+  return { affectedFiles };
+}
+
 function assertFixTargetsUnchanged(snapshot) {
   for (const target of snapshot.targets) {
     if (!readExpectedTarget(target).equals(target.expectedContent)) {
@@ -589,13 +624,39 @@ export function eslintDiagnostics(output, file) {
   return diagnostics;
 }
 
+function fixToolInterruption(tool, files, completedResults) {
+  for (const { item: file, result } of completedResults) {
+    if (FIX_TOOL_INTERRUPTION_OUTCOMES.has(result.outcome)) {
+      return {
+        tool,
+        file,
+        outcome: result.outcome,
+        signal: result.signal ?? null,
+      };
+    }
+  }
+  if (completedResults.length !== files.length) {
+    const completedFiles = new Set();
+    for (const { item: file } of completedResults) {
+      completedFiles.add(file);
+    }
+    return {
+      tool,
+      file: files.find((file) => !completedFiles.has(file)) ?? null,
+      outcome: "timeout",
+      signal: null,
+    };
+  }
+  return null;
+}
+
 /**
  * Run ESLint and Prettier against exact in-memory inputs. Neither tool receives
  * a live path it can rewrite.
  * @param {ReturnType<typeof captureFixSnapshot>["targets"]} targets - Inputs.
  * @param {{eslintFiles: string[], prettierFiles: string[]}} files - Tool sets.
- * @param {{concurrency?: number, now?: () => number, runToolCommand?: typeof runTool, timeoutMs?: number}} [options] - Bounded runner options.
- * @returns {Promise<{outputs: Map<string, string>, toolFailed: boolean, missingTools: string[], diagnostics: string[]}>} Attributable outputs.
+ * @param {{concurrency?: number, now?: () => number, resolveToolCommand?: typeof toolInvocation, runToolCommand?: typeof runTool, timeoutMs?: number}} [options] - Bounded runner options.
+ * @returns {Promise<{outputs: Map<string, string>, toolFailed: boolean, missingTools: string[], diagnostics: string[], interruption: {tool: string, file: string|null, outcome: string, signal: string|null}|null}>} Attributable outputs.
  */
 export async function runFixTools(
   targets,
@@ -603,6 +664,7 @@ export async function runFixTools(
   {
     concurrency = FIX_TOOL_CONCURRENCY,
     now = Date.now,
+    resolveToolCommand = toolInvocation,
     runToolCommand = runTool,
     timeoutMs = toolTimeoutMs(),
   } = {},
@@ -617,6 +679,7 @@ export async function runFixTools(
   const missingTools = new Set();
   const diagnostics = [];
   let toolFailed = false;
+  let interruption = null;
 
   for (const [tool, files] of [
     ["ESLint", eslintFiles],
@@ -627,6 +690,33 @@ export async function runFixTools(
         throw applyError(`${tool} target was not captured: ${file}`);
       }
     }
+  }
+
+  for (const [tool, files] of [
+    ["eslint", eslintFiles],
+    ["prettier", prettierFiles],
+  ]) {
+    if (
+      files.length > 0 &&
+      resolveToolCommand(tool, [], process.cwd()).missingTool
+    ) {
+      missingTools.add(tool);
+    }
+  }
+  if (missingTools.size > 0) {
+    const tool = [...missingTools][0];
+    return {
+      outputs,
+      toolFailed: true,
+      missingTools: [...missingTools],
+      diagnostics,
+      interruption: {
+        tool,
+        file: null,
+        outcome: "missing-tool",
+        signal: null,
+      },
+    };
   }
 
   const deadline = now() + timeoutMs;
@@ -656,11 +746,14 @@ export async function runFixTools(
   if (eslintResults.length !== eslintFiles.length) {
     toolFailed = true;
   }
+  interruption = fixToolInterruption("eslint", eslintFiles, eslintResults);
   for (const { item: file, result } of eslintResults) {
     const input = outputs.get(file);
     appendDiagnostic(diagnostics, result);
-    if (result.outcome === "missing-tool") {
-      missingTools.add(result.missingTool);
+    if (FIX_TOOL_INTERRUPTION_OUTCOMES.has(result.outcome)) {
+      if (result.outcome === "missing-tool") {
+        missingTools.add("eslint");
+      }
       toolFailed = true;
       continue;
     }
@@ -678,29 +771,38 @@ export async function runFixTools(
     }
   }
 
-  const prettierResults = await runBoundedFixTasks(
-    prettierFiles,
-    (file, remainingMs) =>
-      runToolCommand("prettier", ["--stdin-filepath", file], {
-        input: outputs.get(file),
-        timeoutMs: remainingMs,
-      }),
-    runnerOptions,
-  );
-  if (prettierResults.length !== prettierFiles.length) {
-    toolFailed = true;
-  }
-  for (const { item: file, result } of prettierResults) {
-    appendDiagnostic(diagnostics, result);
-    if (result.outcome === "missing-tool") {
-      missingTools.add(result.missingTool);
+  if (!interruption) {
+    const prettierResults = await runBoundedFixTasks(
+      prettierFiles,
+      (file, remainingMs) =>
+        runToolCommand("prettier", ["--stdin-filepath", file], {
+          input: outputs.get(file),
+          timeoutMs: remainingMs,
+        }),
+      runnerOptions,
+    );
+    if (prettierResults.length !== prettierFiles.length) {
       toolFailed = true;
-      continue;
     }
-    if (result.outcome === "success") {
-      outputs.set(file, result.stdout);
-    } else {
-      toolFailed = true;
+    interruption = fixToolInterruption(
+      "prettier",
+      prettierFiles,
+      prettierResults,
+    );
+    for (const { item: file, result } of prettierResults) {
+      appendDiagnostic(diagnostics, result);
+      if (FIX_TOOL_INTERRUPTION_OUTCOMES.has(result.outcome)) {
+        if (result.outcome === "missing-tool") {
+          missingTools.add("prettier");
+        }
+        toolFailed = true;
+        continue;
+      }
+      if (result.outcome === "success") {
+        outputs.set(file, result.stdout);
+      } else {
+        toolFailed = true;
+      }
     }
   }
 
@@ -709,6 +811,7 @@ export async function runFixTools(
     toolFailed,
     missingTools: [...missingTools],
     diagnostics,
+    interruption,
   };
 }
 

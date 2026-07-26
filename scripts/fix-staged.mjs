@@ -14,12 +14,16 @@ import {
 import {
   applyFixOutputs,
   captureFixSnapshot,
+  inspectInterruptedFixState,
   isFixStateChangedError,
   runFixTools,
   stageFixOutputs,
 } from "./lib/fix-safety.mjs";
 import { loadPrecommitConfig } from "./lib/config.mjs";
-import { buildConcurrentFixRefusalMessage } from "./lib/message.mjs";
+import {
+  buildConcurrentFixRefusalMessage,
+  buildInterruptedFixRefusalMessage,
+} from "./lib/message.mjs";
 import { devInstallCommand, runScript } from "./lib/package-manager.mjs";
 import { escapeTerminalText } from "./lib/terminal.mjs";
 
@@ -138,6 +142,23 @@ try {
   for (const diagnostic of fixResult.diagnostics) {
     process.stderr.write(diagnostic.replace(/\n?$/u, "\n"));
   }
+  if (fixResult.interruption) {
+    const { affectedFiles } = inspectInterruptedFixState(snapshot);
+    const message = buildInterruptedFixRefusalMessage({
+      operation: "stage",
+      interruption: fixResult.interruption,
+      affectedFiles,
+      missingTools: fixResult.missingTools,
+      installCommand:
+        fixResult.missingTools.length > 0
+          ? devInstallCommand(fixResult.missingTools)
+          : undefined,
+      tone,
+      rerunCommand: runScript("fix:staged"),
+    });
+    errorBox(message.lines);
+    process.exit(1);
+  }
   const appliedSnapshot = applyFixOutputs(snapshot, fixResult.outputs);
   stagingResult = stageFixOutputs(appliedSnapshot);
 } catch (error) {
@@ -185,12 +206,6 @@ warningBox([
   pc.bold("Manual attention still needed."),
   "",
   pc.dim("Available attributable fixes were applied and staged."),
-  ...(fixResult.missingTools.length > 0
-    ? [
-        pc.dim(`Missing local tool(s): ${fixResult.missingTools.join(", ")}.`),
-        pc.dim(`Install them: ${devInstallCommand(fixResult.missingTools)}`),
-      ]
-    : []),
   pc.dim(
     "Review the ESLint or Prettier output above, then commit again when ready.",
   ),

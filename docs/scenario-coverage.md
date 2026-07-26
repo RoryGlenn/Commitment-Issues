@@ -477,6 +477,15 @@ production-readiness workstream #130 is consolidated in the
   Unresolved target entries and unavailable or malformed index-state probes
   fail closed. Fixture: `test/commit-fix.test.mjs`; unit:
   `test/fix-safety.test.mjs`.
+- **CFIX-018** — timeout, signal, spawn-error, and missing-tool interruptions
+  stop before later tools, staging, or amend. Deterministic two-file,
+  two-tool truncate-then-hang fixtures preserve the exact index, `HEAD`, Git
+  object state, and fixer cache while reporting every worktree target left
+  partial. Completed nonzero lint remains a distinct, attributable outcome;
+  parent-signal and descendant-timeout cleanup stay covered on supported
+  platforms. Fixture: `test/commit-fix.test.mjs`; unit:
+  `test/fix-safety.test.mjs`, `test/message.test.mjs`,
+  `test/fun-tone.test.mjs`.
 
 ### Staged fixes
 
@@ -507,6 +516,13 @@ production-readiness workstream #130 is consolidated in the
   before fixer tools. Hidden worktree bytes, unavailable sparse paths, `HEAD`,
   and the exact index remain unchanged. Fixture: `test/fix-staged.test.mjs`;
   unit: `test/fix-safety.test.mjs`.
+- **STG-014** — an interrupted fixer never contributes stdout or reaches later
+  tool phases, worktree installation, or exact-index staging. A two-file ESLint
+  truncate-then-timeout fixture reports both affected paths, preserves their
+  staged blobs plus the exact index, `HEAD`, Git objects, and cache, and covers
+  the fun-tone refusal. Parent-signal cleanup remains independently exercised.
+  Fixture: `test/fix-staged.test.mjs`; unit: `test/fix-safety.test.mjs`,
+  `test/message.test.mjs`, `test/fun-tone.test.mjs`.
 
 ### Doctor and hook health
 

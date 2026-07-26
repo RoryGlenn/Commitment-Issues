@@ -157,6 +157,17 @@ byte-for-byte. Per-file tool processes run with bounded concurrency and share
 one `precommitChecks.timeoutMs` deadline across the complete fix operation, so
 file count cannot multiply the configured timeout.
 
+A timeout, signal, spawn failure, or missing local tool is an incomplete fixer
+outcome, not an ordinary lint result. Its stdout is never parsed or installed,
+no later tool phase starts, and both commands stop before applying, staging, or
+amending. They revalidate the exact pre-run index and `HEAD`, then inspect every
+captured target without writing it. Targets whose identities or bytes changed,
+or can no longer be verified, are reported by exact path and deliberately left
+untouched because the command cannot prove whether the bytes came from the
+interrupted tool or concurrent user work. A completed nonzero ESLint result
+remains distinct: its attributable dry-run output can continue through
+Prettier, with unresolved diagnostics preserved.
+
 Immediately before staging, the commands verify the same `HEAD`, index, and
 expected worktree bytes. Fixed content is hashed explicitly and a prepared
 index containing only those blobs is installed while holding Git's cooperative

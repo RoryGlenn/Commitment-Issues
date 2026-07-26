@@ -9,6 +9,7 @@ import {
   buildCommitFixHistoryRefusalMessage,
   buildCommitFixOperationRefusalMessage,
   buildConcurrentFixRefusalMessage,
+  buildInterruptedFixRefusalMessage,
 } from "../scripts/lib/message.mjs";
 import {
   cleanupTempRepo,
@@ -263,6 +264,26 @@ test("fun tone rewrites concurrent fixer refusals", () => {
     amended.lines.join("\n"),
     /latest commit was left out of the drama/i,
   );
+});
+
+test("fun tone rewrites interrupted fixer refusals without hiding safety", () => {
+  const message = buildInterruptedFixRefusalMessage({
+    operation: "amend",
+    interruption: {
+      tool: "prettier",
+      file: "src/input.json",
+      outcome: "timeout",
+      signal: null,
+    },
+    tone: "fun",
+    rerunCommand: "npm run commit:fix",
+  });
+  const text = message.lines.join("\n");
+
+  assert.match(text, /left the makeover halfway through/i);
+  assert.match(text, /No interrupted output was staged or amended/);
+  assert.match(text, /index and HEAD remain unchanged/);
+  assert.match(text, /ready for another try/i);
 });
 
 test("fun tone rewrites every commit-fix history refusal", () => {

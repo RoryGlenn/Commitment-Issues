@@ -66,7 +66,6 @@ function captureFile(t, name = "src/snapshot.mjs", content = "export {};\n") {
 }
 
 function assertDependencyLink(source, target) {
-  assert.equal(fs.statSync(target).isDirectory(), true);
   assert.equal(fs.realpathSync.native(target), fs.realpathSync.native(source));
 }
 

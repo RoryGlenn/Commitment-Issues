@@ -190,6 +190,23 @@ exists only on a remote is not observable without network access, so
 refs. Fetch before running the command when the local ref snapshot must include
 new remote state.
 
+## Install-time repair
+
+`init` owns an exact Node-only command or suffix in the consumer's `prepare`
+script. It checks
+`node_modules/commitment-issues/package.json` from the project root. When that
+manifest exists, it imports the sibling `scripts/cli.mjs` with argv set to
+`doctor --quiet` plus any selected `--integration=<manager>` value. The CLI's
+normal exit behavior is preserved, and a present manifest with a missing CLI
+fails as package corruption.
+
+When the manifest is absent—such as after `npm ci --omit=dev`, another
+manager's production install, or direct package removal—the command exits zero
+without output. It does not search ancestors, `PATH`, global installations,
+package-manager runners, or the network. Rerunning `init` migrates an exact
+legacy direct `commitment-issues doctor --quiet` command or suffix to this
+guarded form.
+
 ## Setup removed by `uninstall`
 
 `uninstall` removes only setup it can identify safely:
@@ -210,9 +227,10 @@ manual cleanup and does not delete or edit `.husky/*`, Lefthook YAML,
 configuration. For cleanup reporting only, it inventories exact current and
 pre-dispatch manager entries wherever they appear in executable hook content;
 their position does not make them healthy, and `init` and `doctor` still
-require the dispatcher form first. It removes an exact
-`doctor --quiet --integration=<manager>` prepare command or suffix because that
-package script is generated package state.
+require the dispatcher form first. It removes an exact current guarded prepare
+command or suffix, and continues to recognize the legacy direct
+`doctor --quiet --integration=<manager>` form, because that package script is
+generated package state.
 
 Hook ownership checks do not follow symbolic links. A hook-file symlink,
 dangling symlink, or symlink used as the hooks directory is preserved as

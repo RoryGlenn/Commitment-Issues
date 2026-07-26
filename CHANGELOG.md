@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Production installs no longer fail when `commitment-issues` is intentionally
+  omitted as a development dependency. `init` now generates a Node-only
+  `prepare` repair guard that invokes the exact project-local CLI when its
+  package is installed and exits successfully when the package is absent,
+  without a global, `npx`, package-runner, or network fallback. Direct package
+  removal therefore cannot brick the next install, while normal installs still
+  repair clone-local hooks.
 - `fix:staged` and `commit:fix` now treat a timeout, signal, spawn failure, or
   missing local fixer as an interruption, discard incomplete stdout, stop
   before later tool phases, and refuse before applying, staging, or amending.

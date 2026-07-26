@@ -10,6 +10,7 @@ import {
   hookBody,
   hookInvocation,
   hookManagerSnippets,
+  prepareRepairCommand,
 } from "../scripts/lib/hooks.mjs";
 import {
   compactTerminalBoxText,
@@ -498,7 +499,7 @@ test("uninstall removes an appended prepare repair and preserves prepare", (t) =
   assert.equal(runScript(tempDir, "init").status, 0);
   assert.equal(
     readPackage(tempDir).scripts.prepare,
-    "node build-assets.mjs && commitment-issues doctor --quiet",
+    `node build-assets.mjs && ${prepareRepairCommand()}`,
   );
 
   const result = runScript(tempDir, "uninstall");

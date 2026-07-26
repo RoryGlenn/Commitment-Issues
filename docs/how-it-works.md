@@ -46,6 +46,17 @@ ignore defaults for local tool output.
 
 The hook files call the package binary from `node_modules/.bin`, so the behavior stays local to the project.
 
+### Install-time repair
+
+`init` adds or composes a Node-only `prepare` guard after any project-owned
+setup command. If the project-local package manifest exists, the guard imports
+that exact installed CLI and runs `doctor --quiet`, preserving its result. If a
+production install or direct dependency removal leaves the development package
+absent, the guard exits successfully and stays silent. It never looks for a
+global binary, invokes `npx` or another package runner, or contacts the network.
+A manifest with a missing CLI is still treated as a corrupt installation and
+fails visibly.
+
 ### Existing-manager path
 
 With `init --integration=<manager>`, those entrypoints run inside Husky,
@@ -57,10 +68,10 @@ preserved for explicit remediation instead of guessed healthy.
 
 The generated forms forward Git arguments, stdin, and blocking exits to the
 same Node entrypoints while preserving unrelated manager behavior.
-Install-time verification uses `doctor --quiet --integration=<manager>` and
-warns without modifying manager files or failing an install. Runtime lookup
-remains project-local; hook/GUI environments must provide `node` and any
-manager runtime. See the
+Install-time verification uses the same local-only guard with
+`doctor --quiet --integration=<manager>` and warns without modifying manager
+files or failing an install. Runtime lookup remains project-local; hook/GUI
+environments must provide `node` and any manager runtime. See the
 [coexistence guide](migration.md#keep-an-existing-hook-manager) for exact
 snippets, supported config/wrapper versions, structural checks, path rules,
 bypasses, and uninstall behavior.

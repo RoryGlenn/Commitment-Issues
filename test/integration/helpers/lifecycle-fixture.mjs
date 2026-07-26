@@ -23,6 +23,7 @@ import {
   lefthookRunner,
   preCommitRunner,
 } from "../../helpers/hook-manager-fixtures.mjs";
+import { prepareRepairCommand } from "../../../scripts/lib/hooks.mjs";
 
 const integrationDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(integrationDir, "..", "..", "..");
@@ -131,7 +132,7 @@ const MANAGED_EXPECTED_SCRIPTS = {
   doctor: "commitment-issues doctor",
 };
 const EXPECTED_SCRIPTS = {
-  prepare: `${EXISTING_PREPARE} && commitment-issues doctor --quiet`,
+  prepare: `${EXISTING_PREPARE} && ${prepareRepairCommand()}`,
   ...MANAGED_EXPECTED_SCRIPTS,
 };
 const HOOK_SUBCOMMANDS = {
@@ -236,6 +237,40 @@ function installProject({ ignoreScripts = false } = {}) {
       return ["bun", ["install", ...scriptArgs]];
     default:
       return ["npm", ["install", ...scriptArgs]];
+  }
+}
+
+// Exercise each manager's clean production install surface with
+// NODE_ENV=production. npm runs both common --omit=dev forms because its root
+// prepare lifecycle is the regression that originally exposed this bug.
+function productionInstallCommands() {
+  const productionEnv = { ...lifecycleEnv(), NODE_ENV: "production" };
+  switch (packageManager) {
+    case "pnpm":
+      return [["pnpm", ["install", "--prod"], productionEnv]];
+    case "yarn":
+      return [
+        [...managerInvocation(["install", "--production=true"]), productionEnv],
+      ];
+    case "yarn-berry":
+      return [
+        [
+          ...managerInvocation([
+            "workspaces",
+            "focus",
+            "--all",
+            "--production",
+          ]),
+          productionEnv,
+        ],
+      ];
+    case "bun":
+      return [["bun", ["install", "--production"], productionEnv]];
+    default:
+      return [
+        ["npm", ["ci", "--omit=dev"], lifecycleEnv()],
+        ["npm", ["install", "--omit=dev"], productionEnv],
+      ];
   }
 }
 
@@ -814,6 +849,24 @@ function assertPackageDependencyRemoved(repoDir) {
       );
     }
   }
+}
+
+function assertProductionDependencyOmitted(repoDir) {
+  const pkg = readJson(path.join(repoDir, "package.json"));
+  assertLifecycle(
+    Object.hasOwn(pkg.devDependencies ?? {}, "commitment-issues"),
+    "production installation should preserve the declared development dependency",
+  );
+  assertLifecycle(
+    !fs.existsSync(path.join(repoDir, "node_modules", "commitment-issues")),
+    `${packageManager} production installation should omit commitment-issues`,
+  );
+  assertLifecycle(
+    !LOCAL_MANAGER_BIN_CANDIDATES.some((candidate) =>
+      fs.existsSync(path.join(repoDir, candidate)),
+    ),
+    `${packageManager} production installation should omit every commitment-issues bin`,
+  );
 }
 
 function assertManagerLockfile(repoDir) {
@@ -1786,7 +1839,7 @@ export function createLifecycleIntegration() {
           );
           assertLifecycle(
             integratedPackage.scripts?.prepare ===
-              `${EXISTING_PREPARE} && commitment-issues doctor --quiet --integration=${manager}`,
+              `${EXISTING_PREPARE} && ${prepareRepairCommand(manager)}`,
             `${manager} coexistence should compose owner-specific prepare verification`,
           );
           for (const name of Object.keys(HOOK_SUBCOMMANDS)) {
@@ -2082,6 +2135,30 @@ export function createLifecycleIntegration() {
         assertHookWired(cloneDir, "pre-commit");
         assertHookWired(cloneDir, "pre-push");
         assertHookWired(cloneDir, "commit-msg");
+      },
+    },
+    {
+      name: "survive production install and direct dependency removal",
+      run() {
+        fs.rmSync(path.join(cloneDir, "node_modules"), {
+          recursive: true,
+          force: true,
+        });
+        for (const [command, args, env] of productionInstallCommands()) {
+          run(command, args, cloneDir, env);
+          assertProductionDependencyOmitted(cloneDir);
+          assertPackageJsonConfigured(cloneDir);
+        }
+
+        const [removeCommand, removeArgs] = removeInstalledPackage();
+        run(removeCommand, removeArgs, cloneDir);
+        assertPackageDependencyRemoved(cloneDir);
+        assertPackageJsonConfigured(cloneDir);
+
+        const [installCommand, installArgs] = installProject();
+        run(installCommand, installArgs, cloneDir);
+        assertPackageDependencyRemoved(cloneDir);
+        assertPackageJsonConfigured(cloneDir);
       },
     },
     {

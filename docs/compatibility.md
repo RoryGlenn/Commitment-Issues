@@ -64,6 +64,7 @@ launcher.
 | Clean local install                       | Supported from the packed tarball with each manager above                                                                                                                                                                            |
 | Manager-native CLI                        | Verified through `npx --no-install`, `pnpm exec`, `yarn run`, or `bunx --no-install`                                                                                                                                                 |
 | Normal fresh-clone reinstall              | npm, pnpm, Yarn Classic, and Bun run the consumer-owned `prepare` repair added by `init`; Yarn Berry requires explicit local `doctor` repair because it does not support `prepare` and disables `postinstall` by default             |
+| Production/dev-omitted install            | npm `ci`/`install --omit=dev`, pnpm `--prod`, Yarn Classic `--production`, Yarn Berry production focus, and Bun `--production` keep installation successful when the project-local development package is absent                     |
 | Install with lifecycle scripts disabled   | Installs the CLI but intentionally does not repair clone-local hooks; run the local `doctor` command or reinstall with scripts enabled                                                                                               |
 | Re-initialization and same-version repair | Supported and idempotent                                                                                                                                                                                                             |
 | Existing hook-manager coexistence         | Husky, Lefthook, and pre-commit configs plus effective executable dispatchers are inspected read-only through explicit `--integration=<manager>`; Lefthook commands remain static; lint-staged remains a separate project-owned task |
@@ -75,15 +76,20 @@ launcher.
 | Global install                            | Unsupported; the product contract is project-local                                                                                                                                                                                   |
 
 The package itself declares no dependency install lifecycle script. `init`
-adds or composes `commitment-issues doctor --quiet` in the consuming project's
-`prepare` script so normal installs can repair that repository's clone-local
-hooks. Projects that disable scripts retain an explicit, local recovery path
-without executing package code during dependency installation.
+adds or composes a Node-only guard in the consuming project's `prepare` script.
+When `node_modules/commitment-issues/package.json` exists, the guard imports
+that exact package's CLI and runs `doctor --quiet`; when a production install
+or direct removal leaves the development package absent, it exits successfully
+without trying a global binary, package runner, network resolution, or another
+project. A present package with a missing CLI still fails visibly as a corrupt
+installation. Projects that disable scripts retain an explicit, local recovery
+path without executing package code during dependency installation.
 
 Coexistence instead composes
-`doctor --quiet --integration=<manager>`: installs warn without editing manager
-files or failing. The same spaces, Unicode, worktree, shell, and workspace
-boundaries apply; hooks still need `node` and the selected manager runtime.
+the same guard with `doctor --quiet --integration=<manager>`: installs warn
+without editing manager files or failing. The same spaces, Unicode, worktree,
+shell, and workspace boundaries apply; hooks still need `node` and the selected
+manager runtime.
 Supported config/wrapper versions and manual-review cases are in the
 [coexistence contract](migration.md#keep-an-existing-hook-manager).
 

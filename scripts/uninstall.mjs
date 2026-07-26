@@ -19,6 +19,7 @@ import {
   isHuskyHooksPath,
   inspectHookManagerForCleanup,
   legacyHuskyDirectoryState,
+  prepareRepairCommands,
 } from "./lib/hooks.mjs";
 import { removeCommand } from "./lib/package-manager.mjs";
 import {
@@ -120,12 +121,17 @@ if (standalone.error) {
   process.exit(1);
 }
 
+const currentRepairCommands = prepareRepairCommands();
+const directRepairCommands = [
+  `${BIN} doctor --quiet`,
+  ...HOOK_MANAGERS.map(
+    (manager) => `${BIN} doctor --quiet --integration=${manager}`,
+  ),
+];
 const managedScripts = {
   prepare: [
-    `${BIN} doctor --quiet`,
-    ...HOOK_MANAGERS.map(
-      (manager) => `${BIN} doctor --quiet --integration=${manager}`,
-    ),
+    ...currentRepairCommands,
+    ...directRepairCommands,
     "node scripts/doctor.mjs --quiet",
   ],
   postprepare: [`${BIN} doctor --quiet`, "node scripts/doctor.mjs --quiet"],
@@ -135,10 +141,8 @@ const managedScripts = {
   doctor: [`${BIN} doctor`, "node scripts/doctor.mjs"],
 };
 const repairSuffixes = [
-  ` && ${BIN} doctor --quiet`,
-  ...HOOK_MANAGERS.map(
-    (manager) => ` && ${BIN} doctor --quiet --integration=${manager}`,
-  ),
+  ...currentRepairCommands.map((command) => ` && ${command}`),
+  ...directRepairCommands.map((command) => ` && ${command}`),
 ];
 
 const plannedPackageChanges = [];

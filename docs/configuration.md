@@ -15,6 +15,9 @@ output examples, see the repository's
 - wires `commitment-issues commit-msg "$1"` only when optional
   commit-message linting is explicitly enabled
 - adds npm scripts for `doctor`, `fix:staged`, `commit:fix`, and direct pre-commit checks
+- adds or composes a Node-only `prepare` guard that runs the exact local
+  `doctor --quiet` when installed and exits successfully when a production
+  install omits the development dependency
 - enables advisory push tests in the active configuration source
 - migrates pre-3.0 husky-era wiring (retires the old `core.hooksPath`, removes the generated `.husky` files)
 - gitignores `.eslintcache`, `.prettiercache`, and `node_modules/`
@@ -27,8 +30,8 @@ Nothing is copied into your repo from the package source. The hooks are plain `.
 owner. Init still manages Commitment Issues' package settings and ignores, but
 does not write native/manager hooks or replace `core.hooksPath`; it prints
 project-local snippets and composes
-`doctor --quiet --integration=<manager>` into `prepare`. lint-staged remains a
-separate, user-owned command.
+the guarded `doctor --quiet --integration=<manager>` invocation into `prepare`.
+lint-staged remains a separate, user-owned command.
 
 Bare `--integration` requires exactly one evident owner. Explicit selection
 resolves owner ambiguity, not unsafe selected files: linked, non-regular,

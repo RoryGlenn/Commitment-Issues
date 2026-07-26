@@ -164,7 +164,9 @@ manager's install command; the hook does not ask `npx` to download it.
 - **Native by default, composable by choice:** use owned native hooks or keep
   Husky, Lefthook, or pre-commit through read-only coexistence mode.
 - **Self-repair:** `doctor` restores missing generated hooks after install or
-  clone without overwriting custom hooks.
+  clone without overwriting custom hooks. The generated install guard runs only
+  the project-local package and stays harmless when production installs omit
+  that development dependency.
 - **Local and reversible:** no account or telemetry; preview setup and removal
   with `--dry-run`.
 

@@ -723,16 +723,26 @@ production-readiness workstream #130 is consolidated in the
   `.github/workflows/ci.yml`.
 - **LIFE-007** — pinned immutable v2.5.1, v3.2.0, and v3.3.2 release fixtures upgrade to the candidate tarball, refresh or remove only exact generated state, preserve project-owned `prepare` logic and custom hooks, and execute the migrated hooks during a real commit and push. Required PR evidence: npm on Ubuntu/Node 24; release evidence: the exact publish tarball; scheduled evidence: pnpm, Yarn Classic, and Bun. Fixture: `test/integration/lifecycle-migration.test.mjs`.
 - **LIFE-008** — installing an older release over newer configured state is explicitly unsupported. The documented rollback runs the current version's `uninstall`, restores a lockfile and manifest with the pinned target and peers, installs, and runs the target version's `init` and `doctor`; custom state remains subject to manual review. Contract: [Downgrades and manual rollback](migration.md#downgrades-and-manual-rollback); ownership fixture: `test/uninstall.test.mjs`.
+- **LIFE-009** — clean production installs omit the development-only package
+  without failing the consumer-owned `prepare`; direct dependency removal also
+  leaves the next ordinary install usable. The guard runs only the exact local
+  CLI when its manifest exists, stays silent when the package is absent, and
+  does not hide a present package with a missing CLI. Unit:
+  `test/hooks.test.mjs`; named packed phase:
+  `survive production install and direct dependency removal` in
+  `test/integration/helpers/lifecycle-fixture.mjs`; CI lifecycle matrix:
+  `.github/workflows/ci.yml`.
 
 ### Package managers
 
 - **PM-001** — package-manager detection (npm/pnpm/yarn/bun) via `npm_config_user_agent` and lockfiles, plus package-manager-aware command hints in advisory, `fix:staged`, and `doctor` output. Unit: `test/package-manager.test.mjs`. Subprocess: `test/fix-staged.test.mjs`.
 - **PM-002** — uninstall prints a package-removal command for the detected manager. Unit: `test/package-manager.test.mjs`. Fixture: `test/uninstall.test.mjs`.
 - **PM-003** — pnpm 10 runs the complete named lifecycle phase sequence (pack →
-  install → init → commit → push → repair → worktree → uninstall → dependency
-  removal) on Ubuntu, macOS, and Windows at Node 24, plus the exact Node
-  22.11.0 floor on Ubuntu. CI: `.github/workflows/ci.yml` (`pm-lifecycle`
-  matrix); runner: `scripts/run-lifecycle-test.mjs`; phases:
+  install → init → commit → push → repair → production omission → direct
+  removal → worktree → uninstall) on Ubuntu, macOS, and Windows at Node 24,
+  plus the exact Node 22.11.0 floor on Ubuntu. CI:
+  `.github/workflows/ci.yml` (`pm-lifecycle` matrix); runner:
+  `scripts/run-lifecycle-test.mjs`; phases:
   `test/integration/helpers/lifecycle-fixture.mjs`.
 - **PM-004** — Yarn Classic 1.22.22 runs the same manager-native named phase
   sequence and platform matrix without an npm-runner fallback. CI:

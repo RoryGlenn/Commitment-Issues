@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `fix:staged` and `commit:fix` now refuse before fixer tools when a target has
+  assume-unchanged, skip-worktree, `core.ignoreStat`-derived, intent-to-add,
+  sparse-checkout, unresolved, or other non-ordinary index state. Snapshot
+  capture binds each regular target's exact index blob to its worktree identity
+  and bytes, then revalidates the complete index and target snapshot after Git
+  probes, preventing hidden private edits or mixed-time inspection from being
+  formatted, staged, cached, or amended.
 - `commit:fix` now refuses before fixer tools or repository mutation whenever
   Git reports an active merge, cherry-pick, revert, rebase, `git am`, or
   sequencer state. Worktree-specific operation paths are inspected fail-closed,
@@ -37,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documents the honest offline boundary: remote-only refs remain unknowable
   until fetched, because the command never contacts the network.
 - `fix:staged` and `commit:fix` now bind automatic fixes to the exact `HEAD`,
-  index file and tree, and target bytes inspected before local tools run.
+  index file, and target bytes inspected before local tools run.
   ESLint and Prettier transform those captured bytes through stdin; the
   commands revalidate repository and publication state before staging or
   amending, install only attributable blobs under Git's index lock, and refuse

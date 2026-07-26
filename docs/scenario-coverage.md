@@ -471,6 +471,12 @@ production-readiness workstream #130 is consolidated in the
   are covered. Fixture: `test/commit-fix.test.mjs`; unit:
   `test/fix-safety.test.mjs`, `test/message.test.mjs`,
   `test/fun-tone.test.mjs`.
+- **CFIX-017** — assume-unchanged, skip-worktree,
+  `core.ignoreStat`-derived, and sparse-checkout targets refuse before fixer
+  tools. Hidden private bytes, `HEAD`, and the exact index remain unchanged.
+  Unresolved target entries and unavailable or malformed index-state probes
+  fail closed. Fixture: `test/commit-fix.test.mjs`; unit:
+  `test/fix-safety.test.mjs`.
 
 ### Staged fixes
 
@@ -496,6 +502,11 @@ production-readiness workstream #130 is consolidated in the
   before either path changes; a hardlink added while a fixer runs is detected
   through link-count revalidation and refused before staging. Unit/fixture:
   `test/lib-files.test.mjs`, `test/fix-staged.test.mjs`.
+- **STG-013** — assume-unchanged, skip-worktree,
+  `core.ignoreStat`-derived, sparse-checkout, and intent-to-add targets refuse
+  before fixer tools. Hidden worktree bytes, unavailable sparse paths, `HEAD`,
+  and the exact index remain unchanged. Fixture: `test/fix-staged.test.mjs`;
+  unit: `test/fix-safety.test.mjs`.
 
 ### Doctor and hook health
 

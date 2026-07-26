@@ -138,8 +138,18 @@ the operation files, `HEAD`, index, and worktree available for the original Git
 continue, skip, or abort workflow.
 
 Both fix commands capture the initial `HEAD`, exact index-file identity and
-bytes, complete index tree, target entry mode and blob, and regular-file
-identity. ESLint and Prettier receive captured content through stdin with the
+bytes, each target's stage-zero regular-file mode and blob, and regular
+worktree-file identity and bytes. Each worktree byte sequence must equal its
+indexed blob. Snapshot capture then revalidates the complete index and every
+target after its Git probes, so tools cannot start from identities observed at
+different times. This proof never runs `git write-tree` against the live index;
+only the isolated prepared index is tree-checked before installation.
+
+Assume-unchanged, skip-worktree, `core.ignoreStat`-derived, sparse-checkout,
+intent-to-add, unresolved, non-regular, and otherwise non-ordinary target index
+states are refused before tools run. This prevents Git's ordinary status or
+diff optimizations from hiding private worktree bytes from the fixer safety
+proof. ESLint and Prettier receive captured content through stdin with the
 original path used only for configuration and parser selection; they never
 receive a live target to rewrite. Complete attributable outputs are then
 written with the crash-resistant project-file transaction and rechecked

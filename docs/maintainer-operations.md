@@ -226,7 +226,9 @@ documentation add 19,682 measured unpacked bytes. The exact package is 871,056
 bytes unpacked. It increased from 852 to 879 KiB for issue #313's immutable
 staged-tree checks, whose runtime and shipped documentation add 28,653 measured
 unpacked bytes. The exact package is 899,709 bytes unpacked; the compressed
-ceiling again did not need to change.
+ceiling again did not need to change. Issue #315's empty-script ownership fix
+and v3.5.1 release metadata bring the exact candidate to 900,022 bytes unpacked
+without raising either ceiling.
 
 ## Release candidate identity
 

@@ -1,6 +1,6 @@
 {
   "name": "commitment-issues",
-  "version": "3.5.0",
+  "version": "3.5.1",
   "type": "module",
   "description": "Catch mistakes while they're still cheap to fix. Advisory-first Git hooks show the exact safe command when one is available.",
   "license": "MIT",

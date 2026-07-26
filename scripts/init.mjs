@@ -310,7 +310,7 @@ if (retiringLegacyPrepare) {
     prepareState.status === "invalid"
       ? prepareState.projectScript
       : pkg.scripts.prepare;
-  if (!projectPrepare) {
+  if (!Object.hasOwn(pkg.scripts, "prepare")) {
     pkg.scripts.prepare = desiredRepair;
     created.push("script prepare");
   } else {
@@ -338,7 +338,10 @@ const legacyScripts = {
 };
 for (const [name, value] of Object.entries(scripts)) {
   const current = pkg.scripts[name];
-  if ((!current || current === legacyScripts[name]) && current !== value) {
+  if (
+    (!Object.hasOwn(pkg.scripts, name) || current === legacyScripts[name]) &&
+    current !== value
+  ) {
     pkg.scripts[name] = value;
     created.push(`script ${name}`);
   }

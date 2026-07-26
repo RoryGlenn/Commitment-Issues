@@ -298,9 +298,10 @@ function analyzeProjectPrepare(script) {
 export function composePrepareRepair(projectScript, repairCommand) {
   if (typeof projectScript === "string" && projectScript.trim() === "") {
     return {
-      status: "composed",
-      script: repairCommand,
-      composition: "standalone",
+      status: "unsafe",
+      script: null,
+      composition: null,
+      reason: "scripts.prepare has no project command to preserve",
     };
   }
 

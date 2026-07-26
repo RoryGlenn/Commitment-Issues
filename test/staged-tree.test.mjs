@@ -276,39 +276,71 @@ test("materialization rejects every captured-state race", async (t) => {
   });
 });
 
-test("materialization preserves executable files and symbolic links", (t) => {
+test(
+  "materialization preserves executable files and POSIX symbolic links",
+  { skip: process.platform === "win32" },
+  (t) => {
+    const tempDir = createTempRepo();
+    t.after(() => cleanupTempRepo(tempDir));
+    const executable = path.join(tempDir, "bin", "run.sh");
+    writeFile(executable, "#!/bin/sh\nexit 0\n");
+    fs.chmodSync(executable, 0o755);
+    fs.symlinkSync("run.sh", path.join(tempDir, "bin", "current"));
+    run("git", ["add", "bin/run.sh", "bin/current"], tempDir);
+    const snapshot = captureStagedTree({ cwd: tempDir });
+    t.after(() => snapshot.cleanup());
+    const root = materializeStagedTree(snapshot);
+
+    assert.equal(
+      fs.statSync(path.join(root, "bin", "run.sh")).mode & 0o111,
+      0o111,
+    );
+    assert.equal(fs.readlinkSync(path.join(root, "bin", "current")), "run.sh");
+  },
+);
+
+test("Windows materialization represents Git symlinks without privileges", (t) => {
   const tempDir = createTempRepo();
   t.after(() => cleanupTempRepo(tempDir));
-  const executable = path.join(tempDir, "bin", "run.sh");
-  writeFile(executable, "#!/bin/sh\nexit 0\n");
-  fs.chmodSync(executable, 0o755);
-  fs.symlinkSync("run.sh", path.join(tempDir, "bin", "current"));
-  run("git", ["add", "bin/run.sh", "bin/current"], tempDir);
+  const target = run("git", ["hash-object", "-w", "--stdin"], tempDir, {
+    input: "run.sh",
+  }).stdout.trim();
+  run(
+    "git",
+    ["update-index", "--add", "--cacheinfo", `120000,${target},bin/current`],
+    tempDir,
+  );
   const snapshot = captureStagedTree({ cwd: tempDir });
   t.after(() => snapshot.cleanup());
-  const root = materializeStagedTree(snapshot);
+  const root = materializeStagedTree(snapshot, { platform: "win32" });
+  const materialized = path.join(root, "bin", "current");
 
+  assert.equal(fs.lstatSync(materialized).isSymbolicLink(), false);
+  assert.equal(fs.readFileSync(materialized, "utf8"), "run.sh");
   assert.equal(
-    fs.statSync(path.join(root, "bin", "run.sh")).mode & 0o111,
-    0o111,
+    run("git", ["config", "--bool", "core.symlinks"], root).stdout.trim(),
+    "false",
   );
-  assert.equal(fs.readlinkSync(path.join(root, "bin", "current")), "run.sh");
+  assert.equal(run("git", ["status", "--short"], root).stdout, "");
 });
 
-test("materialization batches large blobs without changing their bytes", (t) => {
+test("materialization streams large blob batches without changing bytes", (t) => {
   const tempDir = createTempRepo();
   t.after(() => cleanupTempRepo(tempDir));
   const first = Buffer.alloc(5 * 1024 * 1024, 0x61);
   const second = Buffer.alloc(5 * 1024 * 1024, 0x62);
+  const third = Buffer.alloc(5 * 1024 * 1024, 0x63);
   fs.writeFileSync(path.join(tempDir, "first.bin"), first);
   fs.writeFileSync(path.join(tempDir, "second.bin"), second);
-  run("git", ["add", "first.bin", "second.bin"], tempDir);
+  fs.writeFileSync(path.join(tempDir, "third.bin"), third);
+  run("git", ["add", "first.bin", "second.bin", "third.bin"], tempDir);
   const snapshot = captureStagedTree({ cwd: tempDir });
   t.after(() => snapshot.cleanup());
   const root = materializeStagedTree(snapshot);
 
   assert.deepEqual(fs.readFileSync(path.join(root, "first.bin")), first);
   assert.deepEqual(fs.readFileSync(path.join(root, "second.bin")), second);
+  assert.deepEqual(fs.readFileSync(path.join(root, "third.bin")), third);
 });
 
 test("materialization rejects malformed and oversized blob metadata", async (t) => {

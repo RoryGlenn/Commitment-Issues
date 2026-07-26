@@ -442,16 +442,47 @@ export function parseBlobBatch(output, objects, sizes) {
   return contents;
 }
 
-function readBlobs(projectRoot, entries) {
-  const objects = [
-    ...new Set(
-      entries
-        .filter((entry) => entry.type === "blob")
-        .map((entry) => entry.object),
-    ),
-  ];
+function writableEntries(root, entries) {
+  const byObject = new Map();
+  for (const entry of entries) {
+    if (entry.type !== "blob") {
+      throw stagedTreeError(
+        `Submodule entry cannot be materialized safely: ${entry.file}`,
+      );
+    }
+    if (!REGULAR_FILE_MODES.has(entry.mode) && entry.mode !== "120000") {
+      throw stagedTreeError(`Unsupported staged-tree mode: ${entry.mode}`);
+    }
+    const target = safeTreePath(root, entry.file);
+    const objectEntries = byObject.get(entry.object) ?? [];
+    objectEntries.push({ entry, target });
+    byObject.set(entry.object, objectEntries);
+  }
+  return byObject;
+}
+
+function writeBlobEntry(entry, target, content, materializeSymbolicLinks) {
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  if (entry.mode === "120000") {
+    if (materializeSymbolicLinks) {
+      fs.symlinkSync(content.toString("utf8"), target);
+    } else {
+      // Git for Windows uses this permission-independent representation when
+      // core.symlinks=false: a regular file containing the link target.
+      fs.writeFileSync(target, content, { flag: "wx", mode: 0o644 });
+    }
+  } else {
+    fs.writeFileSync(target, content, {
+      flag: "wx",
+      mode: entry.mode === "100755" ? 0o755 : 0o644,
+    });
+  }
+}
+
+function writeTree(root, projectRoot, entries, materializeSymbolicLinks) {
+  const entriesByObject = writableEntries(root, entries);
+  const objects = [...entriesByObject.keys()];
   const sizes = blobSizes(projectRoot, objects);
-  const contents = new Map();
   for (const batch of blobBatches(objects, sizes)) {
     const expectedBytes = batch.reduce(
       (total, object) => total + sizes.get(object),
@@ -467,37 +498,21 @@ function readBlobs(projectRoot, entries) {
       }),
       "Unable to read staged blob contents.",
     );
-    for (const [object, content] of parseBlobBatch(output, batch, sizes)) {
-      contents.set(object, content);
-    }
-  }
-  return contents;
-}
-
-function writeTree(root, entries, contents) {
-  for (const entry of entries) {
-    if (entry.type !== "blob") {
-      throw stagedTreeError(
-        `Submodule entry cannot be materialized safely: ${entry.file}`,
-      );
-    }
-    const target = safeTreePath(root, entry.file);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    const content = contents.get(entry.object);
-    if (REGULAR_FILE_MODES.has(entry.mode)) {
-      fs.writeFileSync(target, content, {
-        flag: "wx",
-        mode: entry.mode === "100755" ? 0o755 : 0o644,
-      });
-    } else if (entry.mode === "120000") {
-      fs.symlinkSync(content.toString("utf8"), target);
-    } else {
-      throw stagedTreeError(`Unsupported staged-tree mode: ${entry.mode}`);
+    const contents = parseBlobBatch(output, batch, sizes);
+    for (const object of batch) {
+      for (const { entry, target } of entriesByObject.get(object)) {
+        writeBlobEntry(
+          entry,
+          target,
+          contents.get(object),
+          materializeSymbolicLinks,
+        );
+      }
     }
   }
 }
 
-function initializeSnapshotRepository(snapshot) {
+function initializeSnapshotRepository(snapshot, materializeSymbolicLinks) {
   const objectFormat = oneLine(
     run("git", ["rev-parse", "--show-object-format"], {
       cwd: snapshot.projectRoot,
@@ -539,6 +554,15 @@ function initializeSnapshotRepository(snapshot) {
     }),
     "Unable to configure the staged-tree repository.",
   );
+  if (!materializeSymbolicLinks) {
+    requireSuccessful(
+      run("git", ["config", "core.symlinks", "false"], {
+        cwd: snapshot.root,
+        env: snapshotEnv,
+      }),
+      "Unable to configure staged-tree symbolic links.",
+    );
+  }
   const commitArgs = ["commit-tree", snapshot.tree];
   if (snapshot.head) {
     commitArgs.push("-p", snapshot.head);
@@ -609,22 +633,28 @@ function linkInstalledDependencies(snapshot) {
  * Materialize raw staged blobs without checkout filters or line-ending
  * conversion, then attach an isolated Git repository and installed dependencies.
  * @param {ReturnType<typeof captureStagedTree>} snapshot - Captured tree.
+ * @param {{platform?: NodeJS.Platform}} [options] - Platform override for tests.
  * @returns {string} Disposable exact-tree root.
  */
-export function materializeStagedTree(snapshot) {
+export function materializeStagedTree(
+  snapshot,
+  { platform = process.platform } = {},
+) {
   if (snapshot.root) {
     return snapshot.root;
   }
   const root = path.join(snapshot.temporaryRoot, "tree");
   fs.mkdirSync(root);
   snapshot.root = fs.realpathSync.native(root);
+  const materializeSymbolicLinks = platform !== "win32";
   try {
     writeTree(
       root,
+      snapshot.projectRoot,
       snapshot.entries,
-      readBlobs(snapshot.projectRoot, snapshot.entries),
+      materializeSymbolicLinks,
     );
-    initializeSnapshotRepository(snapshot);
+    initializeSnapshotRepository(snapshot, materializeSymbolicLinks);
     linkInstalledDependencies(snapshot);
     assertCapturedState(snapshot);
     return snapshot.root;

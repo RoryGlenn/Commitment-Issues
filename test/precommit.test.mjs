@@ -834,6 +834,60 @@ test("real pre-commit hook inspects git commit --all's temporary index", (t) => 
   assert.equal(readHeadFile(tempDir, "src/tracked.json"), unformatted);
 });
 
+test("real pre-commit hook inspects only git commit --only's future tree", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  setPrecommitConfig(tempDir, {
+    protectedBranches: [],
+    requireTests: false,
+  });
+  const selected = path.join(tempDir, "src", "selected.json");
+  const unrelated = path.join(tempDir, "src", "unrelated.json");
+  const baseline = '{\n  "value": 1\n}\n';
+  writeFile(selected, baseline);
+  writeFile(unrelated, baseline);
+  run(
+    "git",
+    ["add", "package.json", "src/selected.json", "src/unrelated.json"],
+    tempDir,
+  );
+  run("git", ["commit", "--no-verify", "-m", "tracked baseline"], tempDir);
+  installRealPrecommitHook(tempDir);
+
+  const selectedChange = '{"value":2}\n';
+  const unrelatedChange = '{"value":3}\n';
+  writeFile(selected, selectedChange);
+  writeFile(unrelated, unrelatedChange);
+  run("git", ["add", "src/unrelated.json"], tempDir);
+  const commit = run(
+    "git",
+    [
+      "commit",
+      "--quiet",
+      "--only",
+      "src/selected.json",
+      "-m",
+      "update selected",
+    ],
+    tempDir,
+  );
+  const output = `${commit.stdout}${commit.stderr}`;
+  const formattingSection = output.slice(
+    output.indexOf("1 file with formatting issues"),
+    output.indexOf("Other tracked changes"),
+  );
+
+  assert.equal(commit.status, 0, commit.stderr);
+  assert.match(formattingSection, /src[/\\]selected\.json/);
+  assert.doesNotMatch(formattingSection, /src[/\\]unrelated\.json/);
+  assert.equal(readHeadFile(tempDir, "src/selected.json"), selectedChange);
+  assert.equal(readHeadFile(tempDir, "src/unrelated.json"), baseline);
+  assert.equal(
+    run("git", ["show", ":src/unrelated.json"], tempDir).stdout,
+    unrelatedChange,
+  );
+});
+
 test("default staged Node tests treat option-like paths as files", (t) => {
   const tempDir = createTempRepo();
   t.after(() => cleanupTempRepo(tempDir));

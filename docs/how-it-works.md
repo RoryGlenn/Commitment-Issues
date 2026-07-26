@@ -113,6 +113,9 @@ from the real project.
 - Unstaged and untracked files are absent from the disposable tree, so they
   cannot hide a staged problem, satisfy or enter a test check, or change the
   bytes examined because of `core.autocrlf` or clean/smudge filters.
+- Blob contents are read and written in bounded batches instead of retaining
+  the resulting repository in memory. On Windows, Git symbolic-link entries use
+  the permission-independent `core.symlinks=false` target-text representation.
 - Deleting a test rechecks the source/test relationship in the resulting tree;
   removing the only matching test is not treated as an automatic no-op.
 - If there are no relevant project files, the commit continues.

@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   untracked files can no longer hide staged problems, satisfy missing-test
   checks, enter test runs, or create false CRLF/filter warnings; deletion-only
   commits also evaluate source/test relationships in the resulting commit tree
-  without changing partial staging.
+  without changing partial staging. Blob contents are materialized in bounded
+  batches, and Windows does not require privileged symbolic-link creation.
 - `init` now composes install-time repair safely when a project-owned
   `prepare` ends in a semicolon, background operator, trailing whitespace,
   quoted shell text, or multiple lines. It repairs the exact malformed suffix

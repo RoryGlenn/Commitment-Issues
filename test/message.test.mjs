@@ -19,8 +19,7 @@ import {
 } from "../scripts/lib/message.mjs";
 import { stripAnsi } from "./helpers/output.mjs";
 
-// picocolors emits plain text when stdout is not a TTY (as under `node --test`),
-// so these assertions can match the message content directly.
+// Normalize color styling before assertions that match across wrapped lines.
 
 test("success when there are no issues", () => {
   const { severity, lines } = buildAdvisoryMessage([]);
@@ -89,24 +88,20 @@ test("commit-fix operation refusals distinguish active and unreadable state", ()
   const unreadable = buildCommitFixOperationRefusalMessage({
     rerunCommand: "npm run commit:fix",
   });
+  const activeText = stripAnsi(active.lines.join("\n"));
+  const unreadableText = stripAnsi(unreadable.lines.join("\n"));
 
   assert.equal(active.severity, "error");
-  assert.match(active.lines.join("\n"), /active Git operation/);
-  assert.match(active.lines.join("\n"), /active revert state/);
-  assert.match(active.lines.join("\n"), /pnpm run commit:fix/);
+  assert.match(activeText, /active Git operation/);
+  assert.match(activeText, /active revert state/);
+  assert.match(activeText, /pnpm run commit:fix/);
+  assert.match(activeText, /operation state\s+were left unchanged/);
+  assert.match(unreadableText, /inspect active Git operations/);
   assert.match(
-    active.lines.join("\n"),
-    /operation state\s+were left unchanged/,
-  );
-  assert.match(unreadable.lines.join("\n"), /inspect active Git operations/);
-  assert.match(
-    unreadable.lines.join("\n"),
+    unreadableText,
     /merge,\s+cherry-pick, revert, rebase, git am, or sequencer state/,
   );
-  assert.match(
-    unreadable.lines.join("\n"),
-    /repository state was left unchanged/,
-  );
+  assert.match(unreadableText, /repository state was left unchanged/);
 });
 
 test("advisory input normalization accepts omitted and legacy context shapes", () => {

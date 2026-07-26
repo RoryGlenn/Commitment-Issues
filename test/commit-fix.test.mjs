@@ -28,6 +28,7 @@ import {
   writeCrossPlatformShim,
   writeFile,
 } from "./helpers/temp-repo.mjs";
+import { stripAnsi } from "./helpers/output.mjs";
 
 function runCommitFix(tempDir, options = {}) {
   const { cwd = tempDir, ...runOptions } = options;
@@ -553,7 +554,7 @@ test("active-operation refusals honor fun tone", (t) => {
   createOperationFixture(tempDir, "MERGE_HEAD", "file");
 
   const result = runCommitFix(tempDir);
-  const output = `${result.stdout}${result.stderr}`;
+  const output = stripAnsi(`${result.stdout}${result.stderr}`);
 
   assert.equal(result.status, 1);
   assert.match(output, /Git is already in a complicated relationship\./);

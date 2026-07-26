@@ -4,7 +4,7 @@ Maintainer material for putting `commitment-issues` in front of people. It is
 not shipped in the npm package because `promo/` is outside the `package.json`
 `files` allowlist.
 
-Current technical baseline: v3.4.0 is live on npm, its immutable GitHub Release
+Current technical baseline: v3.5.1 is live on npm, its immutable GitHub Release
 contains the exact npm tarball and matching SLSA provenance, issue #39 is
 closed, and the demo GIF, repository topics, and social preview are complete.
 Recheck those signals on launch day rather than relying on this snapshot.
@@ -14,7 +14,7 @@ Recheck those signals on launch day rather than relying on this snapshot.
 ## Message and media kit
 
 Lead with the developer's feedback loop before listing features. Keep this
-three-part sequence intact across the repository README, next-release npm
+three-part sequence intact across the repository README, live npm
 metadata, Product Hunt description, LinkedIn, Reddit, and X:
 
 > **Catch mistakes while they're still cheap to fix.**
@@ -233,16 +233,16 @@ and tone.
 - [x] Add the reusable before/after SVG and 1200×675 social PNG.
 - [x] Prepare the Product Hunt-native 240×240 thumbnail and four-card
       1270×760 static gallery, with deterministic source/export checks.
-- [x] Align the README, next-release npm metadata, rationale, Product Hunt, and
+- [x] Align the README, npm metadata, rationale, Product Hunt, and
       cross-platform post copy around the same value-first message; the blog
       reinforces it from the documented blocking-hook angle.
-- [ ] Confirm the live npm page carries the new description and README after
-      the next release.
+- [x] Confirm the live npm page carries the new description and README from
+      v3.5.1.
 - [x] Add GitHub repo topics: `git-hooks`, `husky`, `lint-staged`, `pre-commit`, `eslint`, `prettier`, `developer-tools`.
 - [x] Add a social preview image (Settings → General → Social preview).
-- [x] Publish and independently verify v3.4.0, including matching npm/GitHub
+- [x] Publish and independently verify v3.5.1, including matching npm/GitHub
       tarballs and signed SLSA provenance.
-- [ ] Re-run the clean-install launch path: `init`, advisory commit warning,
+- [x] Re-run the clean-install launch path: `init`, advisory commit warning,
       `commit:fix`, and related push-time tests.
 - [ ] Recheck npm, the immutable GitHub Release assets, CI, CodeQL, DCO,
       Scorecard, README media, and repository availability on launch day.

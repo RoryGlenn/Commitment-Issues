@@ -2069,6 +2069,11 @@ test("doctor displays shared worktree hooks outside the checkout", (t) => {
     tempDir,
   );
   assert.equal(added.status, 0);
+  fs.symlinkSync(
+    path.join(repoRoot, "scripts"),
+    path.join(worktree, "scripts"),
+    process.platform === "win32" ? "junction" : "dir",
+  );
 
   const result = runDoctor(worktree);
   // Git and Node may spell the same Windows/macOS temp parent differently

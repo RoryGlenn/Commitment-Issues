@@ -232,7 +232,10 @@ made absolute so Node cannot interpret a repository filename as an option.
 - Its first eligible clean or informational human-readable run shows the
   default-on, once-per-clone welcome as the final box;
   `showWelcomeOnFirstCommit: false` opts out.
-- `scripts/precommit.mjs` inspects staged files and prints one consolidated summary box.
+- `scripts/precommit.mjs` derives one immutable tree from a copy of the Git
+  index, checks its exact blob bytes in a disposable repository, and prints one
+  consolidated summary box. It never substitutes unstaged or untracked files
+  for the future commit.
 - The pre-push hook runs `commitment-issues prepush "$@"` so Git's remote
   arguments reach first-push base selection.
 - `scripts/prepush.mjs` runs tests associated with pushed files in advisory mode by default.
@@ -276,7 +279,12 @@ The hook flags staged code files that have no matching test, but it skips files 
 - Storybook stories (`*.stories.*`)
 - generated code (`*.generated.*`, or files under `generated/` / `__generated__/`)
 
-A matching test is found when it sits next to the file, in an adjacent `__tests__/`, or in a top-level `test/` / `tests/` directory. For example, `src/foo.ts` is satisfied by `test/foo.test.ts`.
+A matching test is found in the future commit tree when it sits next to the
+file, in an adjacent `__tests__/`, or in a top-level `test/` / `tests/`
+directory. For example, `src/foo.ts` is satisfied by `test/foo.test.ts` only
+when that test is already tracked or staged. An untracked or unstaged-only test
+does not satisfy the check, and deleting the last matching test flags the
+remaining source.
 
 To exempt additional paths, add glob patterns under `precommitChecks.testExempt` in `package.json`:
 
@@ -301,7 +309,11 @@ By default the commit hook only checks for missing tests; it does not run them. 
 }
 ```
 
-When enabled, the hook runs `testCommand` against the staged test files plus the tests it can find for staged source files. `testCommand` is optional and defaults to `node --test`.
+When enabled, the hook runs `testCommand` inside the disposable future-tree
+repository against staged test files plus the tests it finds there for staged
+source files. The command cannot see unrelated untracked files or unstaged
+versions of tracked files through that working directory. `testCommand` is
+optional and defaults to `node --test`.
 
 > Enabling `runStagedTests` executes a repo-defined command on every commit, similar to `lint-staged`. Only enable it in repositories you trust. Spawned tools are capped by a timeout so a hung command cannot wedge a commit.
 

@@ -79,7 +79,7 @@ test("uninstall removes generated setup and preserves shared project state", (t)
 
   assert.equal(fs.existsSync(gitHook(tempDir, "pre-commit")), false);
   assert.equal(fs.existsSync(gitHook(tempDir, "pre-push")), false);
-  assert.match(readFile(tempDir, ".gitignore"), /node_modules\//);
+  assert.match(readFile(tempDir, ".gitignore"), /^node_modules\/?$/m);
   assert.match(readFile(tempDir, ".gitignore"), /\.eslintcache/);
 
   const second = runScript(tempDir, "uninstall");

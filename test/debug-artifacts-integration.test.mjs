@@ -217,8 +217,13 @@ test("diff inspection failures remain advisory and identify the unavailable scan
   run("git", ["add", "src/app.py"], tempDir);
 
   for (const env of [
-    fakeGitEnv(tempDir, "diff --cached -U0"),
-    fakeGitEnv(tempDir, "diff --cached -U0", 0, "not a unified diff\n"),
+    fakeGitEnv(tempDir, "diff-tree --no-commit-id --no-renames -r -U0"),
+    fakeGitEnv(
+      tempDir,
+      "diff-tree --no-commit-id --no-renames -r -U0",
+      0,
+      "not a unified diff\n",
+    ),
   ]) {
     const result = runPrecommit(tempDir, { env });
     const output = `${result.stdout}${result.stderr}`;
@@ -244,7 +249,9 @@ test("secret and debug checks reuse exactly one staged patch invocation", (t) =>
   const stagedPatchCalls = fs
     .readFileSync(logPath, "utf8")
     .split("\n")
-    .filter((line) => line.includes("diff --cached -U0"));
+    .filter((line) =>
+      line.includes("diff-tree --no-commit-id --no-renames -r -U0"),
+    );
   assert.equal(stagedPatchCalls.length, 1);
   assert.match(stagedPatchCalls[0], /--src-prefix=a\/ --dst-prefix=b\//);
 });

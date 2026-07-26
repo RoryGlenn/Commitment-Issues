@@ -76,14 +76,21 @@ import {
   codeFilePattern,
   formatFilePattern,
   findTestFile,
+  isTestFile,
   isTestExemptFile,
   isThirdPartyPath,
   collectTestsForFiles,
-  parseLsFilesStage,
   parseNulPaths,
+  testFileCandidates,
 } from "./lib/files.mjs";
+import {
+  captureStagedTree,
+  materializeStagedTree,
+  stagedTreePatch,
+} from "./lib/staged-tree.mjs";
 
 enterWorktreeRoot();
+const PROJECT_ROOT = process.cwd();
 const TOOL_TIMEOUT_MS = toolTimeoutMs();
 const GIT_PATH_ARGS = ["-c", "core.quotePath=false"];
 // The whole-index probe keeps argv fixed-size for Windows while allowing far
@@ -104,16 +111,20 @@ if (outputArgs.error) {
 }
 const jsonMode = outputArgs.enabled;
 
-function runEslint(files) {
+function runEslint(files, stagedTreeRoot) {
   return runToolBatches(
     "eslint",
     ["--cache", "--cache-strategy", "content", "--format", "json", "--"],
     files,
-    { stdio: ["pipe", "pipe", "pipe"] },
+    {
+      cwd: stagedTreeRoot,
+      stdio: ["pipe", "pipe", "pipe"],
+      toolCwd: PROJECT_ROOT,
+    },
   );
 }
 
-function runPrettier(files) {
+function runPrettier(files, stagedTreeRoot) {
   return runToolBatches(
     "prettier",
     [
@@ -127,24 +138,29 @@ function runPrettier(files) {
       "--",
     ],
     files,
-    { stdio: ["pipe", "pipe", "pipe"] },
+    {
+      cwd: stagedTreeRoot,
+      stdio: ["pipe", "pipe", "pipe"],
+      toolCwd: PROJECT_ROOT,
+    },
   );
 }
 
-function runStagedTestCommand(testCommand, tests) {
+function runStagedTestCommand(testCommand, tests, stagedTreeRoot) {
   // Avoid leaking this process's test-runner context or Git's hook-local
   // repository routing into the spawned tests. The suite can rediscover this
   // checkout by cwd, while any nested Git fixtures remain isolated.
   const env = withoutGitLocalEnvironment();
   delete env.NODE_TEST_CONTEXT;
   const nodeParts = isNodeTestCommand(testCommand)
-    ? nodeTestArgumentParts(testCommand, tests)
+    ? nodeTestArgumentParts(testCommand, tests, [], stagedTreeRoot)
     : null;
   return runBatchedCommand(
     testCommand[0],
     nodeParts?.fixedArgs ?? testCommand.slice(1),
     nodeParts?.fileArgs ?? tests,
     {
+      cwd: stagedTreeRoot,
       env,
       stdio: ["pipe", "pipe", "pipe"],
     },
@@ -264,18 +280,10 @@ if (
   process.exit(1);
 }
 
-const gitFiles = run("git", [
-  ...GIT_PATH_ARGS,
-  "diff",
-  "--cached",
-  "--name-only",
-  "-z",
-  "--diff-filter=ACMRT",
-]);
-
-const rawStagedFiles = parseNulPaths(gitFiles.stdout);
-
-if (gitFiles.error || gitFiles.status !== 0 || rawStagedFiles === null) {
+let stagedTree;
+try {
+  stagedTree = captureStagedTree({ cwd: PROJECT_ROOT });
+} catch (error) {
   // Advisory philosophy: the hook cannot check anything, but it must not
   // block the commit either — warn (matching the pre-push advisory
   // uninspectable state) and continue.
@@ -290,8 +298,8 @@ if (gitFiles.error || gitFiles.status !== 0 || rawStagedFiles === null) {
     status: "failed",
     summary: "Git could not inspect staged files",
     details: {
-      status: gitFiles.status,
-      error: gitFiles.error?.message || null,
+      status: null,
+      error: error.message,
     },
   });
   if (jsonMode) {
@@ -310,51 +318,42 @@ if (gitFiles.error || gitFiles.status !== 0 || rawStagedFiles === null) {
   process.exit(0);
 }
 
-if (rawStagedFiles.length === 0) {
-  const anyStagedResult = run("git", [
-    ...GIT_PATH_ARGS,
-    "diff",
-    "--cached",
-    "--quiet",
-  ]);
-  const hasStagedChanges =
-    !anyStagedResult.error && anyStagedResult.status === 1;
+process.once("exit", () => stagedTree.cleanup());
 
-  const summary = hasStagedChanges
-    ? "Deletion-only commit; no applicable files to check"
-    : "No staged files to check";
+const rawStagedFiles = stagedTree.files;
+const hasStagedChanges = stagedTree.allChangedFiles.length > 0;
+
+if (!hasStagedChanges) {
+  const summary = "No staged files to check";
   jsonOutput.addCheck({
     id: "staged-files",
     status: "skipped",
     summary,
-    details: { deletionOnly: hasStagedChanges, files: [] },
+    details: { deletionOnly: false, files: [] },
   });
   if (jsonMode) {
     emitJsonResult({ status: "skipped", summary });
   }
-  printHookMessage(
-    "info",
-    hasStagedChanges
-      ? [
-          pc.bold("Deletion-only commit — nothing to check."),
-          "",
-          pc.dim("Removing files needs no lint, format, or tests. Looks good!"),
-        ]
-      : [
-          pc.bold("No staged files to check."),
-          "",
-          pc.dim("Stage changes with git add before committing."),
-        ],
-  );
+  printHookMessage("info", [
+    pc.bold("No staged files to check."),
+    "",
+    pc.dim("Stage changes with git add before committing."),
+  ]);
 
   process.exit(0);
 }
 
 jsonOutput.addCheck({
   id: "staged-files",
-  status: "passed",
-  summary: `${rawStagedFiles.length} staged file${rawStagedFiles.length === 1 ? "" : "s"} inspected`,
-  details: { files: rawStagedFiles },
+  status: rawStagedFiles.length > 0 ? "passed" : "skipped",
+  summary:
+    rawStagedFiles.length > 0
+      ? `${rawStagedFiles.length} staged file${rawStagedFiles.length === 1 ? "" : "s"} inspected`
+      : "Deletion-only commit; resulting tree inspected",
+  details: {
+    deletionOnly: rawStagedFiles.length === 0,
+    files: rawStagedFiles,
+  },
 });
 
 const stagedFiles = rawStagedFiles.filter((file) => !isThirdPartyPath(file));
@@ -362,18 +361,22 @@ const stagedFiles = rawStagedFiles.filter((file) => !isThirdPartyPath(file));
 // Secrets and debug-artifact advisories share one validated staged patch. The
 // parser preserves unusual Git paths, ignores binary/deletion-only sections,
 // and exposes only added lines to deterministic local rules.
-const stagedDiff =
-  secretScanConfig.scanSecrets || debugArtifactConfig.scanDebugArtifacts
-    ? run("git", [
-        ...GIT_PATH_ARGS,
-        "diff",
-        "--cached",
-        "-U0",
-        "--no-color",
-        "--src-prefix=a/",
-        "--dst-prefix=b/",
-      ])
-    : null;
+let stagedDiff = null;
+if (secretScanConfig.scanSecrets || debugArtifactConfig.scanDebugArtifacts) {
+  try {
+    stagedDiff = {
+      error: undefined,
+      status: 0,
+      stdout: stagedTreePatch(stagedTree),
+    };
+  } catch {
+    stagedDiff = {
+      error: undefined,
+      status: 1,
+      stdout: "",
+    };
+  }
+}
 const stagedDiffInspection = stagedDiff
   ? inspectStagedDiffResult(stagedDiff)
   : { addedLines: [], inspected: false, outcome: "disabled" };
@@ -597,54 +600,37 @@ function collectGuardIssues() {
     }
   }
 
-  const numstat = run("git", [
-    ...GIT_PATH_ARGS,
-    "diff",
-    "--cached",
-    "--numstat",
-    "-z",
-  ]);
-  if (!numstat.error && numstat.status === 0) {
-    const shape = parseNumstat(numstat.stdout);
-    if (shape !== null) {
-      guardIssues.push(...largeCommitIssues(shape, guardConfig));
-    }
+  const shape = parseNumstat(stagedTree.numstat);
+  if (shape !== null) {
+    guardIssues.push(...largeCommitIssues(shape, guardConfig));
   }
 
   if (guardConfig.maxFileSizeMb > 0) {
-    const index = run("git", [...GIT_PATH_ARGS, "ls-files", "--stage", "-z"], {
+    const objectByFile = new Map(
+      stagedTree.entries
+        .filter((entry) => entry.type === "blob")
+        .map((entry) => [entry.file, entry.object]),
+    );
+    const stagedBlobs = rawStagedFiles
+      .filter((file) => objectByFile.has(file))
+      .map((file) => ({ file, object: objectByFile.get(file) }));
+    const batch = run("git", ["cat-file", "--batch-check"], {
+      input: stagedBlobs.map(({ object }) => object).join("\n"),
       maxBuffer: GIT_GUARD_MAX_BUFFER_BYTES,
     });
-    const indexEntries = parseLsFilesStage(index.stdout);
-    if (index.error || index.status !== 0 || indexEntries === null) {
-      guardIssues.push(largeFileInspectionIssue(index.error));
-    } else {
-      const objectByFile = new Map(
-        indexEntries
-          .filter((entry) => entry.stage === 0)
-          .map((entry) => [entry.file, entry.object]),
+    if (!batch.error && batch.status === 0) {
+      const sizeIssue = largeFileIssue(
+        parseBatchCheckSizes(
+          batch.stdout,
+          stagedBlobs.map(({ file }) => file),
+        ),
+        guardConfig,
       );
-      const stagedBlobs = rawStagedFiles
-        .filter((file) => objectByFile.has(file))
-        .map((file) => ({ file, object: objectByFile.get(file) }));
-      const batch = run("git", ["cat-file", "--batch-check"], {
-        input: stagedBlobs.map(({ object }) => object).join("\n"),
-        maxBuffer: GIT_GUARD_MAX_BUFFER_BYTES,
-      });
-      if (!batch.error && batch.status === 0) {
-        const sizeIssue = largeFileIssue(
-          parseBatchCheckSizes(
-            batch.stdout,
-            stagedBlobs.map(({ file }) => file),
-          ),
-          guardConfig,
-        );
-        if (sizeIssue) {
-          guardIssues.push(sizeIssue);
-        }
-      } else {
-        guardIssues.push(largeFileInspectionIssue(batch.error));
+      if (sizeIssue) {
+        guardIssues.push(sizeIssue);
       }
+    } else {
+      guardIssues.push(largeFileInspectionIssue(batch.error));
     }
   }
 
@@ -696,39 +682,88 @@ function exitWithGuardSummary(infoLines, summary) {
   process.exit(0);
 }
 
-if (stagedFiles.length === 0) {
-  exitWithGuardSummary(
-    [
-      pc.bold("No project files to check."),
-      "",
-      pc.dim("Only package dependency files are staged."),
-    ],
-    "No project files to check",
-  );
-}
-
 const stagedJsFiles = stagedFiles.filter((file) => codeFilePattern.test(file));
 const stagedFormatFiles = stagedFiles.filter((file) =>
   formatFilePattern.test(file),
 );
+const deletedTestFiles = stagedTree.deletedFiles.filter(
+  (file) => !isThirdPartyPath(file) && isTestFile(file),
+);
+const needsMaterializedTree =
+  stagedJsFiles.length > 0 ||
+  stagedFormatFiles.length > 0 ||
+  (config.requireTests !== false && deletedTestFiles.length > 0);
+let stagedTreeRoot = null;
 
-if (stagedJsFiles.length === 0 && stagedFormatFiles.length === 0) {
-  exitWithGuardSummary(
-    [
-      pc.bold("No lintable or formattable files staged."),
-      "",
-      pc.dim(
-        `${stagedFiles.length} staged file${stagedFiles.length === 1 ? "" : "s"} will be committed without checks.`,
-      ),
-    ],
-    "No lintable or formattable files staged",
-  );
+if (needsMaterializedTree) {
+  try {
+    stagedTreeRoot = materializeStagedTree(stagedTree);
+    jsonOutput.addCheck({
+      id: "staged-tree",
+      status: "passed",
+      summary: "Exact staged tree materialized",
+      details: {},
+    });
+  } catch (error) {
+    const materializationError = error.message;
+    const issue = {
+      autoFixable: false,
+      type: "git",
+      message: "Unable to inspect the exact staged tree",
+      detail: materializationError,
+    };
+    issues.push(issue);
+    jsonOutput.addCheck({
+      id: "staged-tree",
+      status: "failed",
+      summary: "Exact staged tree could not be materialized",
+      details: {
+        error: materializationError,
+      },
+    });
+    exitWithGuardSummary(
+      [
+        pc.bold("Unable to inspect the exact staged tree."),
+        "",
+        pc.dim("Commit will continue without lint, format, or test claims."),
+      ],
+      "Commit allowed, but the exact staged tree could not be checked",
+    );
+  }
+} else {
+  jsonOutput.addCheck({
+    id: "staged-tree",
+    status: "skipped",
+    summary: "No exact-tree checks are needed",
+    details: {},
+  });
 }
 
-// Missing-test detection is pure and instant; opt out with requireTests: false.
-if (config.requireTests !== false && stagedJsFiles.length > 0) {
-  const missingTests = stagedJsFiles.filter(
-    (file) => !isTestExemptFile(file) && !findTestFile(file),
+const deletedTestSet = new Set(deletedTestFiles);
+const orphanedSources =
+  config.requireTests !== false && deletedTestFiles.length > 0
+    ? stagedTree.entries
+        .map((entry) => entry.file)
+        .filter(
+          (file) =>
+            !isThirdPartyPath(file) &&
+            codeFilePattern.test(file) &&
+            !isTestExemptFile(file) &&
+            !findTestFile(file, stagedTreeRoot) &&
+            testFileCandidates(file, stagedTreeRoot).some((candidate) =>
+              deletedTestSet.has(candidate),
+            ),
+        )
+    : [];
+const testRelevantSources = [
+  ...new Set([...stagedJsFiles, ...orphanedSources]),
+];
+
+// Test discovery reads only the materialized future tree. Unstaged and
+// untracked paths therefore cannot satisfy a source file or enter a test run.
+if (config.requireTests !== false && testRelevantSources.length > 0) {
+  const missingTests = testRelevantSources.filter(
+    (file) => !isTestExemptFile(file) && !findTestFile(file, stagedTreeRoot),
   );
 
   if (missingTests.length > 0) {
@@ -748,7 +783,7 @@ const missingTestIssues = issues.filter(
 jsonOutput.addCheck({
   id: "missing-tests",
   status:
-    config.requireTests === false || stagedJsFiles.length === 0
+    config.requireTests === false || testRelevantSources.length === 0
       ? "skipped"
       : missingTestIssues.length > 0
         ? "advisory"
@@ -756,16 +791,51 @@ jsonOutput.addCheck({
   summary:
     config.requireTests === false
       ? "Missing-test detection is disabled"
-      : stagedJsFiles.length === 0
+      : testRelevantSources.length === 0
         ? "No staged source files need test discovery"
         : missingTestIssues.length > 0
           ? missingTestIssues[0].message
           : "Staged source files have tests or exemptions",
-  details: { sourceFiles: stagedJsFiles },
+  details: { sourceFiles: testRelevantSources },
 });
 
+if (rawStagedFiles.length === 0) {
+  exitWithGuardSummary(
+    [
+      pc.bold("Deletion-only commit — resulting tree checked."),
+      "",
+      pc.dim("Removed files leave source and test relationships intact."),
+    ],
+    "Deletion-only commit; resulting tree checked",
+  );
+}
+
+if (stagedFiles.length === 0) {
+  exitWithGuardSummary(
+    [
+      pc.bold("No project files to check."),
+      "",
+      pc.dim("Only package dependency files are staged."),
+    ],
+    "No project files to check",
+  );
+}
+
+if (stagedJsFiles.length === 0 && stagedFormatFiles.length === 0) {
+  exitWithGuardSummary(
+    [
+      pc.bold("No lintable or formattable files staged."),
+      "",
+      pc.dim(
+        `${stagedFiles.length} staged file${stagedFiles.length === 1 ? "" : "s"} will be committed without checks.`,
+      ),
+    ],
+    "No lintable or formattable files staged",
+  );
+}
+
 const stagedTests = config.runStagedTests
-  ? collectTestsForFiles(stagedFiles)
+  ? collectTestsForFiles(stagedFiles, stagedTreeRoot)
   : [];
 const testCommand =
   Array.isArray(config.testCommand) && config.testCommand.length > 0
@@ -774,12 +844,12 @@ const testCommand =
 
 // Run the independent tool checks concurrently.
 const [eslintResult, prettierResult, testRun] = await Promise.all([
-  stagedJsFiles.length > 0 ? runEslint(stagedJsFiles) : null,
+  stagedJsFiles.length > 0 ? runEslint(stagedJsFiles, stagedTreeRoot) : null,
   // The no-lint/no-format state exits above, and every JS/TS extension is also
   // formattable, so this collection is guaranteed non-empty here.
-  runPrettier(stagedFormatFiles),
+  runPrettier(stagedFormatFiles, stagedTreeRoot),
   stagedTests.length > 0
-    ? runStagedTestCommand(testCommand, stagedTests)
+    ? runStagedTestCommand(testCommand, stagedTests, stagedTreeRoot)
     : null,
 ]);
 
@@ -819,7 +889,7 @@ if (eslintResult) {
     eslintFixableCount += batchSummary.fixableCount;
     eslintManualDetail.push(
       ...eslintManualIssues(batch.stdout).map((issue) =>
-        formatEslintManualIssue(issue, process.cwd()),
+        formatEslintManualIssue(issue, stagedTreeRoot),
       ),
     );
     eslintFailedWithoutIssues ||=

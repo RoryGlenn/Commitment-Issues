@@ -243,6 +243,21 @@ test("Node test arguments separate configured options from hostile paths", () =>
       ],
     },
   );
+  assert.deepEqual(
+    nodeTestArgumentParts(
+      ["node", "--test"],
+      ["-future.test.mjs"],
+      [],
+      path.join(path.parse(process.cwd()).root, "future-tree"),
+    ).fileArgs,
+    [
+      path.join(
+        path.parse(process.cwd()).root,
+        "future-tree",
+        "-future.test.mjs",
+      ),
+    ],
+  );
 });
 
 test("argument budgets use bytes on POSIX and conservative units on Windows", () => {
@@ -738,6 +753,19 @@ test("runTool runs a resolved local tool", async () => {
   assert.match(result.stdout, /\d+\.\d+/);
 });
 
+test("runTool resolves from the project while executing in another tree", async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "tool-cwd-"));
+  t.after(() => fs.rmSync(tempDir, { force: true, recursive: true }));
+
+  const result = await runTool("prettier", ["--version"], {
+    cwd: tempDir,
+    toolCwd: process.cwd(),
+  });
+
+  assert.equal(result.outcome, "success");
+  assert.match(result.stdout, /\d+\.\d+/);
+});
+
 test("runTool returns missing-tool without invoking a command fallback", async () => {
   const result = await runTool("definitely-not-installed-xyz", ["--help"]);
   assert.equal(result.outcome, "missing-tool");
@@ -756,6 +784,22 @@ test("runToolBatches preserves missing-tool outcomes without a fallback", async 
   assert.equal(result.missingTool, "definitely-not-installed-xyz");
   assert.equal(result.batchCount, 1);
   assert.equal(result.plannedBatchCount, 0);
+});
+
+test("runToolBatches checks files in a separate exact-tree cwd", async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "tool-batch-cwd-"));
+  t.after(() => fs.rmSync(tempDir, { force: true, recursive: true }));
+  fs.writeFileSync(path.join(tempDir, "formatted.json"), "{}\n");
+
+  const result = await runToolBatches(
+    "prettier",
+    ["--check", "--"],
+    ["formatted.json"],
+    { cwd: tempDir, toolCwd: process.cwd() },
+  );
+
+  assert.equal(result.outcome, "success");
+  assert.equal(result.batchCount, 1);
 });
 
 test("batched commands continue after nonzero results and aggregate output", async () => {

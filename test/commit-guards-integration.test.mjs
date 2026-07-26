@@ -40,8 +40,8 @@ function headSha(tempDir) {
   return run("git", ["rev-parse", "HEAD"], tempDir).stdout.trim();
 }
 
-function largeIndexGitEnv(tempDir, targetBytes) {
-  const binDir = path.join(tempDir, `.large-index-${targetBytes}`);
+function largeBatchCheckGitEnv(tempDir, targetBytes) {
+  const binDir = path.join(tempDir, `.large-batch-check-${targetBytes}`);
   fs.mkdirSync(binDir, { recursive: true });
   writeCrossPlatformShim(
     binDir,
@@ -50,13 +50,18 @@ function largeIndexGitEnv(tempDir, targetBytes) {
 import { spawnSync } from "node:child_process";
 const args = process.argv.slice(2);
 const realGit = process.env.FAKE_GIT_REAL || "git";
-if (args.includes("ls-files") && args.includes("--stage") && args.includes("-z")) {
-  const result = spawnSync(realGit, args, { encoding: null, maxBuffer: 4 * 1024 * 1024 });
+if (args.includes("cat-file") && args.includes("--batch-check")) {
+  const input = fs.readFileSync(0);
+  const result = spawnSync(realGit, args, {
+    encoding: null,
+    input,
+    maxBuffer: 4 * 1024 * 1024,
+  });
   if (result.error || result.status !== 0) {
     if (result.stderr) process.stderr.write(result.stderr);
     process.exit(result.status == null ? 1 : result.status);
   }
-  const filler = "100644 " + "0".repeat(40) + " 0\\ttracked/" + "x".repeat(72) + "\\0";
+  const filler = "0".repeat(40) + " blob 0\\n";
   const repeats = Math.max(0, Math.ceil((${targetBytes} - result.stdout.length) / Buffer.byteLength(filler)));
   fs.writeFileSync(1, Buffer.concat([result.stdout, Buffer.from(filler.repeat(repeats))]));
   process.exit(0);
@@ -330,7 +335,7 @@ test("precommit keeps the large-file guard above spawnSync's default buffer", (t
     "node",
     [path.join(tempDir, "scripts", "precommit.mjs")],
     tempDir,
-    { env: largeIndexGitEnv(tempDir, 2 * 1024 * 1024) },
+    { env: largeBatchCheckGitEnv(tempDir, 2 * 1024 * 1024) },
   );
   const output = `${result.stdout}${result.stderr}`;
 
@@ -339,7 +344,7 @@ test("precommit keeps the large-file guard above spawnSync's default buffer", (t
   assert.doesNotMatch(output, /file-size check unavailable/);
 });
 
-test("precommit reports an index beyond the bounded inspection ceiling", (t) => {
+test("precommit reports blob metadata beyond the bounded inspection ceiling", (t) => {
   const tempDir = createTempRepo();
   t.after(() => cleanupTempRepo(tempDir));
 
@@ -349,13 +354,13 @@ test("precommit reports an index beyond the bounded inspection ceiling", (t) => 
     protectedBranches: [],
     scanSecrets: false,
   });
-  stageCleanFile(tempDir);
+  stageCleanFile(tempDir, "clean.bin");
 
   const result = run(
     "node",
     [path.join(tempDir, "scripts", "precommit.mjs")],
     tempDir,
-    { env: largeIndexGitEnv(tempDir, 17 * 1024 * 1024) },
+    { env: largeBatchCheckGitEnv(tempDir, 17 * 1024 * 1024) },
   );
   const output = `${result.stdout}${result.stderr}`;
 
@@ -561,7 +566,10 @@ test("a failing numstat skips the size guard but keeps other guards", (t) => {
   writeFile(path.join(tempDir, "extra.md"), "# extra\n");
   run("git", ["add", "-f", "dist/bundle.js", "extra.md"], tempDir);
 
-  const env = fakeGitEnv(tempDir, "--numstat");
+  const env = fakeGitEnv(
+    tempDir,
+    "diff-tree --no-commit-id --no-renames -r --numstat",
+  );
   const result = run(
     "node",
     [path.join(tempDir, "scripts", "precommit.mjs")],

@@ -403,9 +403,17 @@ failures fail open.
 
 Staged and pushed-file test commands inherit the developer's ordinary
 environment, but Git's repository-local routing variables are removed first.
-The command still discovers the current checkout from its working directory;
-nested Git fixtures therefore cannot be redirected into the hook caller by an
-inherited `GIT_DIR`, work tree, or index path.
+Pre-commit creates one immutable tree from an exact copy of the active index,
+materializes raw blobs without checkout filters or line-ending conversion, and
+runs its test command inside an isolated disposable repository whose `HEAD` and
+index both name that tree. Blob contents are streamed in bounded batches;
+Windows uses Git's permission-independent `core.symlinks=false` representation
+for symbolic-link entries and keeps the disposable tree on the installed
+dependency filesystem so local-tool junctions remain traversable. Unstaged and
+untracked project files are absent.
+Pre-push still discovers the current checkout from its working directory.
+Nested Git fixtures in either flow cannot be redirected into the hook caller by
+an inherited `GIT_DIR`, work tree, or index path.
 
 ## Configuration interface
 

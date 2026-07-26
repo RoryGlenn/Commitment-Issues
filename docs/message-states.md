@@ -372,6 +372,11 @@ with `package.json` `precommitChecks` or built-in defaults instead.
 
 Shown when Git cannot list the staged files at all. True to the advisory philosophy, the commit still continues.
 
+`Unable to inspect the exact staged tree.` is the corresponding warning when
+Git identifies staged changes but their immutable future tree cannot be
+materialized for lint, format, or test checks. The commit continues without
+claiming those checks passed.
+
 ### No staged files
 
 <p>
@@ -386,7 +391,10 @@ Shown when the pre-commit hook runs with no staged files.
   <img src="../assets/deletion-only-commit.svg" alt="Info output showing that only deleted files are staged" width="734">
 </p>
 
-Shown when only deleted files are staged.
+`Deletion-only commit — resulting tree checked.` is shown when only deleted
+files are staged and the resulting source/test relationships remain valid. If
+deleting a test leaves a source uncovered, the normal consolidated warning
+names that source instead.
 
 ### No lintable or formattable files
 

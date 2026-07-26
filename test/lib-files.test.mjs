@@ -18,6 +18,7 @@ import {
   isThirdPartyPath,
   findTestFile,
   findTestFiles,
+  testFileCandidates,
   collectTestsForFiles,
   parseLsFilesStage,
   parseNameStatusPaths,
@@ -1589,6 +1590,23 @@ test("findTestFile and collectTestsForFiles locate sibling tests", (t) => {
     "src/widget.test.mjs",
   ]);
   assert.deepEqual(collectTestsForFiles(["src/missing.mjs", "a.png"]), []);
+});
+
+test("related-test discovery can target an explicit future-tree root", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "files-future-tree-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(dir, "src"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "test"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "package.json"), "{}\n");
+  fs.writeFileSync(path.join(dir, "test", "future.test.mjs"), "export {};\n");
+
+  assert.equal(findTestFile("src/future.mjs", dir), "test/future.test.mjs");
+  assert.deepEqual(collectTestsForFiles(["src/future.mjs"], dir), [
+    "test/future.test.mjs",
+  ]);
+  assert.ok(
+    testFileCandidates("src/future.mjs", dir).includes("test/future.test.mjs"),
+  );
 });
 
 test("related-test lookup stays inside the nearest monorepo package", (t) => {

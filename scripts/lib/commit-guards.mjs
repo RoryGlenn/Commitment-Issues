@@ -88,7 +88,7 @@ export function branchFromRef(ref) {
 }
 
 /**
- * Totals a NUL-delimited `git diff --cached --numstat -z` listing. Binary
+ * Totals a NUL-delimited `git diff-tree --numstat -z` listing. Binary
  * entries report "-" counts and contribute 0 changed lines but still count as
  * a file. Rename/copy records contain an empty header path followed by old and
  * new pathname fields; those count as one file without parsing pathname bytes.
@@ -262,7 +262,7 @@ export function largeFileInspectionIssue(error = null) {
     type: "shape",
     message: "Staged file-size check unavailable",
     detail: outputLimitExceeded
-      ? "Git returned more index data than the bounded inspection buffer allows."
+      ? "Git returned more blob metadata than the bounded inspection buffer allows."
       : "Git could not inspect staged blob sizes; retry after restoring Git access.",
   };
 }

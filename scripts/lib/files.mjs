@@ -280,10 +280,17 @@ export function isTestExemptFile(file) {
   );
 }
 
-function packageRootFor(file) {
+function packageRootFor(file, cwd = process.cwd()) {
   let current = path.posix.dirname(file);
   while (current !== ".") {
-    if (fs.existsSync(path.posix.join(current, "package.json"))) {
+    if (
+      fs.existsSync(
+        path.resolve(
+          cwd,
+          ...path.posix.join(current, "package.json").split("/"),
+        ),
+      )
+    ) {
       return current;
     }
     const parent = path.posix.dirname(current);
@@ -297,7 +304,9 @@ function packageRootFor(file) {
   // workspace boundary from the root declaration so a deleted source does not
   // suddenly fall through to an unrelated root basename test.
   try {
-    const rootPackage = JSON.parse(fs.readFileSync("package.json", "utf8"));
+    const rootPackage = JSON.parse(
+      fs.readFileSync(path.resolve(cwd, "package.json"), "utf8"),
+    );
     const workspaceGlobs = Array.isArray(rootPackage.workspaces)
       ? rootPackage.workspaces
       : Array.isArray(rootPackage.workspaces?.packages)
@@ -320,17 +329,76 @@ function packageRootFor(file) {
   return "";
 }
 
-function existingTests(candidateBases) {
+function existingTests(candidateBases, cwd = process.cwd()) {
   const matches = [];
   for (const candidateBase of candidateBases) {
     for (const suffix of testSuffixes) {
       const candidate = `${candidateBase}${suffix}`;
-      if (fs.existsSync(candidate)) {
+      if (fs.existsSync(path.resolve(cwd, ...candidate.split("/")))) {
         matches.push(normalizeRepoPath(candidate));
       }
     }
   }
   return [...new Set(matches)];
+}
+
+function testCandidateTiers(file, cwd = process.cwd()) {
+  const normalized = normalizeRepoPath(file);
+  const dirname = path.posix.dirname(normalized);
+  const basename = path.posix.basename(
+    normalized,
+    path.posix.extname(normalized),
+  );
+  const packageRoot = packageRootFor(normalized, cwd);
+  const relative = path.posix.relative(packageRoot || ".", normalized);
+  const relativeBase = relative.slice(0, -path.posix.extname(relative).length);
+  const testRoots = ["test", "tests"].map((dir) =>
+    packageRoot ? path.posix.join(packageRoot, dir) : dir,
+  );
+  const tiers = [
+    [
+      path.posix.join(dirname, basename),
+      path.posix.join(dirname, "__tests__", basename),
+    ],
+    testRoots.map((dir) => path.posix.join(dir, relativeBase)),
+  ];
+
+  const relativeParts = relativeBase.split("/");
+  if (["src", "lib"].includes(relativeParts[0]) && relativeParts.length > 1) {
+    const withoutSourceRoot = relativeParts.slice(1).join("/");
+    tiers.push(testRoots.map((dir) => path.posix.join(dir, withoutSourceRoot)));
+  }
+
+  // Backward compatibility for single-package repositories that historically
+  // used test/<basename>. A nested package is intentionally not allowed to
+  // escape its package boundary and claim this root-level fallback.
+  if (packageRoot === "") {
+    tiers.push([
+      path.posix.join("test", basename),
+      path.posix.join("tests", basename),
+    ]);
+  }
+  return tiers;
+}
+
+/**
+ * Enumerate every deterministic test pathname that could match a source file.
+ * Unlike {@link findTestFiles}, candidates do not need to exist. This lets a
+ * future-tree check connect a deleted test to the source it used to cover.
+ * @param {string} file - Repo-relative source path.
+ * @param {string} [cwd] - Tree root used for package-boundary discovery.
+ * @returns {string[]} Ordered possible test paths.
+ */
+export function testFileCandidates(file, cwd = process.cwd()) {
+  return [
+    ...new Set(
+      testCandidateTiers(file, cwd).flatMap((tier) =>
+        tier.flatMap((base) =>
+          testSuffixes.map((suffix) => normalizeRepoPath(`${base}${suffix}`)),
+        ),
+      ),
+    ),
+  ];
 }
 
 /**
@@ -343,58 +411,17 @@ function existingTests(candidateBases) {
  * workspace with the same source basename from stealing its test selection.
  *
  * @param {string} file - Repo-relative source path.
+ * @param {string} [cwd] - Tree root used for filesystem discovery.
  * @returns {string[]} Matching test file paths.
  */
-export function findTestFiles(file) {
-  const normalized = normalizeRepoPath(file);
-  const dirname = path.posix.dirname(normalized);
-  const basename = path.posix.basename(
-    normalized,
-    path.posix.extname(normalized),
-  );
-
-  const colocated = existingTests([
-    path.posix.join(dirname, basename),
-    path.posix.join(dirname, "__tests__", basename),
-  ]);
-  if (colocated.length > 0) {
-    return colocated;
-  }
-
-  const packageRoot = packageRootFor(normalized);
-  const relative = path.posix.relative(packageRoot || ".", normalized);
-  const relativeBase = relative.slice(0, -path.posix.extname(relative).length);
-  const testRoots = ["test", "tests"].map((dir) =>
-    packageRoot ? path.posix.join(packageRoot, dir) : dir,
-  );
-
-  const mirrored = existingTests(
-    testRoots.map((dir) => path.posix.join(dir, relativeBase)),
-  );
-  if (mirrored.length > 0) {
-    return mirrored;
-  }
-
-  const relativeParts = relativeBase.split("/");
-  if (["src", "lib"].includes(relativeParts[0]) && relativeParts.length > 1) {
-    const withoutSourceRoot = relativeParts.slice(1).join("/");
-    const packageFallback = existingTests(
-      testRoots.map((dir) => path.posix.join(dir, withoutSourceRoot)),
-    );
-    if (packageFallback.length > 0) {
-      return packageFallback;
+export function findTestFiles(file, cwd = process.cwd()) {
+  for (const tier of testCandidateTiers(file, cwd)) {
+    const matches = existingTests(tier, cwd);
+    if (matches.length > 0) {
+      return matches;
     }
   }
-
-  // Backward compatibility for single-package repositories that historically
-  // used test/<basename>. A nested package is intentionally not allowed to
-  // escape its package boundary and claim this root-level fallback.
-  return packageRoot === ""
-    ? existingTests([
-        path.posix.join("test", basename),
-        path.posix.join("tests", basename),
-      ])
-    : [];
+  return [];
 }
 
 /**
@@ -402,10 +429,11 @@ export function findTestFiles(file) {
  * only need to know whether a test exists.
  *
  * @param {string} file - Repo-relative source path.
+ * @param {string} [cwd] - Tree root used for filesystem discovery.
  * @returns {string|null} First test file path, or null if none exists.
  */
-export function findTestFile(file) {
-  return findTestFiles(file)[0] ?? null;
+export function findTestFile(file, cwd = process.cwd()) {
+  return findTestFiles(file, cwd)[0] ?? null;
 }
 
 /**
@@ -414,9 +442,10 @@ export function findTestFile(file) {
  * changed source file. Vendored node_modules paths are skipped — their tests
  * are never ours to run. Shared by the commit hook and the pre-push gate.
  * @param {string[]} files - Changed/staged repo-relative paths.
+ * @param {string} [cwd] - Tree root used for filesystem discovery.
  * @returns {string[]} De-duplicated list of test files to run.
  */
-export function collectTestsForFiles(files) {
+export function collectTestsForFiles(files, cwd = process.cwd()) {
   const tests = new Set();
   for (const file of files) {
     const normalized = normalizeRepoPath(file);
@@ -426,7 +455,7 @@ export function collectTestsForFiles(files) {
     if (isTestFile(normalized)) {
       tests.add(normalized);
     } else if (codeFilePattern.test(normalized)) {
-      for (const match of findTestFiles(normalized)) {
+      for (const match of findTestFiles(normalized, cwd)) {
         tests.add(match);
       }
     }

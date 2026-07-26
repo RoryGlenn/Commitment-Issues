@@ -426,9 +426,15 @@ export function isNodeTestCommand(command) {
  * @param {string[]} command - Node executable plus configured arguments.
  * @param {string[]} files - Discovered test paths.
  * @param {string[]} [injectedOptions] - Additional Node options.
+ * @param {string} [cwd] - Execution root for option-like relative paths.
  * @returns {{fixedArgs: string[], fileArgs: string[]}} Batchable arguments.
  */
-export function nodeTestArgumentParts(command, files, injectedOptions = []) {
+export function nodeTestArgumentParts(
+  command,
+  files,
+  injectedOptions = [],
+  cwd = process.cwd(),
+) {
   const configured = command.slice(1);
   const separator = configured.indexOf("--");
   const options =
@@ -437,7 +443,7 @@ export function nodeTestArgumentParts(command, files, injectedOptions = []) {
   // Node's test runner can still mis-handle a leading-hyphen relative pathname
   // after `--`; an absolute path is unambiguously positional on every platform.
   const safeFiles = files.map((file) =>
-    file.startsWith("-") ? path.resolve(file) : file,
+    file.startsWith("-") ? path.resolve(cwd, file) : file,
   );
   return {
     fixedArgs: [...options, ...injectedOptions, "--"],
@@ -898,11 +904,13 @@ export function runBatchedCommand(command, fixedArgs, items, options = {}) {
  * Missing tools return immediately; they are never delegated to npx.
  * @param {string} name - Package/bin name.
  * @param {string[]} args - Tool arguments.
- * @param {object} [options] - Extra spawn options.
+ * @param {object & {toolCwd?: string}} [options] - Extra spawn options plus
+ *   the project root used only to resolve the local tool.
  * @returns {Promise<object & {outcome: ProcessOutcome}>} Structured result.
  */
 export function runTool(name, args, options = {}) {
-  const invocation = toolInvocation(name, args, options.cwd ?? process.cwd());
+  const { toolCwd = options.cwd ?? process.cwd(), ...spawnOptions } = options;
+  const invocation = toolInvocation(name, args, toolCwd);
   if (invocation.missingTool) {
     return Promise.resolve(
       withOutcome({
@@ -915,7 +923,7 @@ export function runTool(name, args, options = {}) {
       }),
     );
   }
-  return spawnAsync(invocation.command, invocation.args, options);
+  return spawnAsync(invocation.command, invocation.args, spawnOptions);
 }
 
 /**
@@ -925,15 +933,13 @@ export function runTool(name, args, options = {}) {
  * @param {string} name - Package/bin name.
  * @param {string[]} fixedArgs - Tool arguments repeated for every batch.
  * @param {T[]} items - Variable items to partition.
- * @param {object} [options] - Batch policy and spawn options.
+ * @param {object & {toolCwd?: string}} [options] - Batch policy and spawn
+ *   options plus the project root used only to resolve the local tool.
  * @returns {Promise<object & {outcome: ProcessOutcome}>} Aggregate result.
  */
 export function runToolBatches(name, fixedArgs, items, options = {}) {
-  const invocation = toolInvocation(
-    name,
-    fixedArgs,
-    options.cwd ?? process.cwd(),
-  );
+  const { toolCwd = options.cwd ?? process.cwd(), ...batchOptions } = options;
+  const invocation = toolInvocation(name, fixedArgs, toolCwd);
   if (invocation.missingTool) {
     return Promise.resolve(
       aggregateBatchResults(
@@ -951,5 +957,10 @@ export function runToolBatches(name, fixedArgs, items, options = {}) {
       ),
     );
   }
-  return runBatchedCommand(invocation.command, invocation.args, items, options);
+  return runBatchedCommand(
+    invocation.command,
+    invocation.args,
+    items,
+    batchOptions,
+  );
 }

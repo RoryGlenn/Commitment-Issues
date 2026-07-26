@@ -582,7 +582,12 @@ export function createTempRepo({ commit = true, suppressWelcome = true } = {}) {
     path.join(tempDir, "node_modules"),
   );
 
-  writeFile(path.join(tempDir, ".gitignore"), "node_modules/\nscripts/\n");
+  // Ignore the link entries themselves, not only directory traversal below
+  // them. Otherwise Git records these coverage-only links as staged symlinks;
+  // on Windows an exact core.symlinks=false snapshot must represent those
+  // entries as regular files, which makes the fixture's local tools
+  // intentionally unreachable.
+  writeFile(path.join(tempDir, ".gitignore"), "node_modules\nscripts\n");
   if (commit) {
     run("git", ["add", "."], tempDir);
     run("git", ["commit", "-m", "init"], tempDir);

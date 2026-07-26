@@ -16,6 +16,7 @@ import {
   detachedForPlatform,
   estimatedProcessArgumentUnits,
   isNodeTestCommand,
+  isWorktreeRoot,
   nodeTestArgumentParts,
   nodeTestArguments,
   POSIX_ARGUMENT_BUDGET_BYTES,
@@ -101,6 +102,31 @@ test("worktree root resolution accepts Git path record endings defensively", (t)
     );
     assert.equal(resolveWorktreeRoot(tempDir, environment), null);
   }
+});
+
+test("worktree root identity accepts alternate filesystem spellings", (t) => {
+  const tempDir = createTempRepo();
+  const aliasRoot = fs.mkdtempSync(path.join(os.tmpdir(), "root-alias-"));
+  const alias = path.join(aliasRoot, "repository alias");
+  fs.symlinkSync(
+    tempDir,
+    alias,
+    process.platform === "win32" ? "junction" : "dir",
+  );
+  const nested = path.join(tempDir, "nested");
+  fs.mkdirSync(nested);
+  t.after(() => {
+    fs.rmSync(aliasRoot, { recursive: true, force: true });
+    cleanupTempRepo(tempDir);
+  });
+
+  assert.equal(isWorktreeRoot(alias, tempDir), true);
+  assert.equal(isWorktreeRoot(nested, tempDir), false);
+  assert.equal(isWorktreeRoot(tempDir, null), false);
+
+  const disappeared = path.join(tempDir, "disappeared");
+  assert.equal(isWorktreeRoot(disappeared, disappeared), true);
+  assert.equal(isWorktreeRoot(disappeared, tempDir), false);
 });
 
 test("worktree root resolution supports linked worktrees and submodules", (t) => {

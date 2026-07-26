@@ -31,7 +31,7 @@ import {
   readStandalonePrecommitConfig,
   STANDALONE_CONFIG_FILE,
 } from "./lib/config.mjs";
-import { resolveWorktreeRoot } from "./lib/process.mjs";
+import { isWorktreeRoot, resolveWorktreeRoot } from "./lib/process.mjs";
 import { escapeTerminalText } from "./lib/terminal.mjs";
 
 // Remove only setup that commitment-issues can identify as its own. Exact
@@ -40,10 +40,7 @@ import { escapeTerminalText } from "./lib/terminal.mjs";
 // deliberately preserved.
 
 const worktreeRoot = resolveWorktreeRoot();
-if (
-  worktreeRoot &&
-  path.relative(worktreeRoot, path.resolve(process.cwd())) !== ""
-) {
+if (worktreeRoot && !isWorktreeRoot(process.cwd(), worktreeRoot)) {
   errorBox([
     pc.bold("Project root required."),
     "",

@@ -208,7 +208,7 @@ additional space.
 The unpacked ceiling includes the roughly 26 KiB measured increase from the
 reviewed concurrent-fix transaction runtime added for issue #303. It increased
 from 800 to 806 KiB for issue #307's worktree-root resolution, whose runtime and
-user documentation add 4,823 measured unpacked bytes. The compressed ceiling
+user documentation add 5,701 measured unpacked bytes. The compressed ceiling
 did not need to change.
 
 ## Release candidate identity

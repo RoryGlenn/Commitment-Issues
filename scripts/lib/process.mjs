@@ -288,6 +288,30 @@ export function resolveWorktreeRoot(
 }
 
 /**
+ * Check whether a directory is the owning worktree root by filesystem
+ * identity. Windows launchers can spell the same directory with short and
+ * long paths, while POSIX callers can reach it through a symlink.
+ * @param {string} [cwd] - Directory to compare with the worktree root.
+ * @param {string|null} [worktreeRoot] - Previously resolved worktree root.
+ * @returns {boolean} Whether both paths identify the same directory.
+ */
+export function isWorktreeRoot(
+  cwd = process.cwd(),
+  worktreeRoot = resolveWorktreeRoot(cwd),
+) {
+  if (!worktreeRoot) return false;
+  const canonical = (directory) => {
+    const resolved = path.resolve(directory);
+    try {
+      return fs.realpathSync.native(resolved);
+    } catch {
+      return resolved;
+    }
+  };
+  return path.relative(canonical(worktreeRoot), canonical(cwd)) === "";
+}
+
+/**
  * Make repository-relative config, paths, tools, and child cwd deterministic
  * for a runtime command launched anywhere inside its owning worktree.
  * @returns {string|null} The entered root, or null when cwd is not a worktree.

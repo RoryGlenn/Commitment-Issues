@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: MIT
 
 import fs from "node:fs";
-import path from "node:path";
 import pc from "picocolors";
 import { errorBox, infoBox, printBox, warningBox } from "./lib/ui.mjs";
 import {
@@ -33,7 +32,7 @@ import {
   resolvePrecommitConfigSources,
   STANDALONE_CONFIG_FILE,
 } from "./lib/config.mjs";
-import { resolveWorktreeRoot, run } from "./lib/process.mjs";
+import { isWorktreeRoot, resolveWorktreeRoot, run } from "./lib/process.mjs";
 import { logoLines } from "./lib/logo.mjs";
 import { escapeTerminalText } from "./lib/terminal.mjs";
 import {
@@ -49,10 +48,7 @@ import {
 // setups. Safe to re-run.
 
 const worktreeRoot = resolveWorktreeRoot();
-if (
-  worktreeRoot &&
-  path.relative(worktreeRoot, path.resolve(process.cwd())) !== ""
-) {
+if (worktreeRoot && !isWorktreeRoot(process.cwd(), worktreeRoot)) {
   errorBox([
     pc.bold("Project root required."),
     "",

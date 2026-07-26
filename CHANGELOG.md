@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Git-reported paths, finding local tools, or launching child processes.
   Commands behave consistently from repository descendants, nested
   repositories, submodules, and linked worktrees; setup, doctor, and uninstall
-  now refuse descendant directories explicitly.
+  now refuse descendant directories explicitly while recognizing alternate
+  filesystem spellings of the root, including Windows short paths.
 - Parent `SIGINT`, `SIGTERM`, and `SIGHUP` now terminate active attached tool
   trees before signal-appropriate exit. Timeouts share this cleanup, and a
   bounded fallback releases pipes held by unreclaimable escaped descendants.

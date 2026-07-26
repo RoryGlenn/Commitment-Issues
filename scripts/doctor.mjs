@@ -9,6 +9,7 @@ import { printBoxModel } from "./lib/ui.mjs";
 import {
   isPackageInstalled,
   isToolInstalled,
+  isWorktreeRoot,
   resolveWorktreeRoot,
   run,
 } from "./lib/process.mjs";
@@ -147,10 +148,7 @@ function repairFailed(lines) {
 }
 
 const worktreeRoot = resolveWorktreeRoot();
-if (
-  worktreeRoot &&
-  path.relative(worktreeRoot, path.resolve(process.cwd())) !== ""
-) {
+if (worktreeRoot && !isWorktreeRoot(process.cwd(), worktreeRoot)) {
   notApplicable([
     pc.bold("Project root required."),
     "",

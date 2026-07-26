@@ -16,15 +16,15 @@ in `package.json` `files`.)
       gallery cards covering the plain-language value story, setup, advisory
       warning, and safe fix.
 - [x] Consistent "Catch mistakes while they're still cheap to fix" messaging in
-      the README, next-release npm metadata, rationale, and launch kit.
-- [ ] Confirm the live npm page carries the new story after the next release.
+      the README, live npm metadata, rationale, and launch kit.
+- [x] Confirm the live npm page carries the new story from v3.5.1.
 - [x] Simple logo / wordmark for the README header and social preview.
 
 ## Trust signals
 
 - [x] `CHANGELOG.md` in Keep a Changelog format, shipped in the tarball.
 - [x] Current immutable GitHub Release with independently verified assets
-      (v3.4.0). The legacy empty notes through v3.3.2 are documented; current
+      (v3.5.1). The legacy empty notes through v3.3.2 are documented; current
       and future releases require reviewed changelog notes.
 - [x] Cross-platform CI (Ubuntu/macOS/Windows × Node 22.11.0/24) with coverage.
 - [x] Scenario-coverage tracker mapping the full test suite.
@@ -40,7 +40,7 @@ direct adoption lever.
 - [x] Publish via npm **Trusted Publishing** (OIDC from the `publish.yml`
       release workflow) — tokenless, with npm provenance. Live since v2.4.0.
 - [x] Publish the exact npm tarball and matching signed SLSA provenance on one
-      immutable GitHub Release. End-to-end validated with v3.4.0.
+      immutable GitHub Release. End-to-end validated with v3.5.1.
 - [x] `.github/dependabot.yml` (or Renovate) for automated dependency-update PRs.
 - [x] OpenSSF Scorecard workflow + badge.
 - [x] Coverage badge in the README — surfaces the CI coverage result.

@@ -85,10 +85,13 @@ export function recognizedPrepareRepairCommands() {
 }
 
 function splitTrailingWhitespace(script) {
-  const trailingWhitespace = script.match(/\s*$/u)[0];
+  let bodyEnd = script.length;
+  while (bodyEnd > 0 && /\s/u.test(script[bodyEnd - 1])) {
+    bodyEnd -= 1;
+  }
   return {
-    body: script.slice(0, script.length - trailingWhitespace.length),
-    trailingWhitespace,
+    body: script.slice(0, bodyEnd),
+    trailingWhitespace: script.slice(bodyEnd),
   };
 }
 

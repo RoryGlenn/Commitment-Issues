@@ -65,6 +65,11 @@ function captureFile(t, name = "src/snapshot.mjs", content = "export {};\n") {
   return { snapshot, tempDir };
 }
 
+function assertDependencyLink(source, target) {
+  assert.equal(fs.statSync(target).isDirectory(), true);
+  assert.equal(fs.realpathSync.native(target), fs.realpathSync.native(source));
+}
+
 test("parses exact staged-tree and blob batch records", () => {
   const object = "a".repeat(40);
   assert.deepEqual(parseTreeEntries(`100644 blob ${object}\todd name.js\0`), [
@@ -159,9 +164,9 @@ test("captures and materializes one immutable future commit tree", (t) => {
     fs.readFileSync(path.join(tempDir, "src", "snapshot.mjs"), "utf8"),
     worktree,
   );
-  assert.equal(
-    fs.lstatSync(path.join(root, "node_modules")).isSymbolicLink(),
-    true,
+  assertDependencyLink(
+    path.join(tempDir, "node_modules"),
+    path.join(root, "node_modules"),
   );
   assert.equal(materializeStagedTree(snapshot), root);
 });
@@ -464,15 +469,13 @@ test("dependency links cover root and nested package installations", (t) => {
   t.after(() => snapshot.cleanup());
   const root = materializeStagedTree(snapshot);
 
-  assert.equal(
-    fs.lstatSync(path.join(root, "node_modules")).isSymbolicLink(),
-    true,
+  assertDependencyLink(
+    path.join(tempDir, "node_modules"),
+    path.join(root, "node_modules"),
   );
-  assert.equal(
-    fs
-      .lstatSync(path.join(root, "packages", "child", "node_modules"))
-      .isSymbolicLink(),
-    true,
+  assertDependencyLink(
+    path.join(tempDir, "packages", "child", "node_modules"),
+    path.join(root, "packages", "child", "node_modules"),
   );
 });
 
@@ -491,11 +494,11 @@ test("dependency linking skips non-directory installations and occupied targets"
   });
 
   await t.test("occupied target", (t) => {
-    const { snapshot } = captureFile(t);
+    const { snapshot, tempDir } = captureFile(t);
     const root = materializeStagedTree(snapshot);
-    assert.equal(
-      fs.lstatSync(path.join(root, "node_modules")).isSymbolicLink(),
-      true,
+    assertDependencyLink(
+      path.join(tempDir, "node_modules"),
+      path.join(root, "node_modules"),
     );
   });
 });

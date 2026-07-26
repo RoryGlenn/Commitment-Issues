@@ -224,8 +224,8 @@ ownership-preserving prepare composition, including fail-closed heredoc and
 control-flow handling, whose runtime, changelog, and shipped lifecycle
 documentation add 19,682 measured unpacked bytes. The exact package is 871,056
 bytes unpacked. It increased from 852 to 876 KiB for issue #313's immutable
-staged-tree checks, whose runtime and shipped documentation add 24,401 measured
-unpacked bytes. The exact package is 895,457 bytes unpacked; the compressed
+staged-tree checks, whose runtime and shipped documentation add 25,015 measured
+unpacked bytes. The exact package is 896,071 bytes unpacked; the compressed
 ceiling again did not need to change.
 
 ## Release candidate identity

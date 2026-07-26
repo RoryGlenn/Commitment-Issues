@@ -806,6 +806,34 @@ test("real pre-commit hook reports and commits the exact staged bytes", (t) => {
   assert.equal(fs.readFileSync(file, "utf8"), unformatted);
 });
 
+test("real pre-commit hook inspects git commit --all's temporary index", (t) => {
+  const tempDir = createTempRepo();
+  t.after(() => cleanupTempRepo(tempDir));
+  setPrecommitConfig(tempDir, {
+    protectedBranches: [],
+    requireTests: false,
+  });
+  const file = path.join(tempDir, "src", "tracked.json");
+  writeFile(file, '{\n  "value": 1\n}\n');
+  run("git", ["add", "package.json", "src/tracked.json"], tempDir);
+  run("git", ["commit", "--no-verify", "-m", "tracked baseline"], tempDir);
+  installRealPrecommitHook(tempDir);
+
+  const unformatted = '{"value":2}\n';
+  writeFile(file, unformatted);
+  const commit = run(
+    "git",
+    ["commit", "--all", "-m", "update tracked"],
+    tempDir,
+  );
+  const output = `${commit.stdout}${commit.stderr}`;
+
+  assert.equal(commit.status, 0, commit.stderr);
+  assert.match(output, /formatting issues/);
+  assert.doesNotMatch(output, /No staged files to check/);
+  assert.equal(readHeadFile(tempDir, "src/tracked.json"), unformatted);
+});
+
 test("default staged Node tests treat option-like paths as files", (t) => {
   const tempDir = createTempRepo();
   t.after(() => cleanupTempRepo(tempDir));

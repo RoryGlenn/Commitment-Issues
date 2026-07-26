@@ -49,11 +49,23 @@ function gitEnvironment(overrides = {}) {
   };
 }
 
+function activeIndexEnvironment() {
+  const environment = gitEnvironment();
+  // `git commit --all` prepares the future commit in a temporary index and
+  // routes hooks to it through GIT_INDEX_FILE. Preserve only that Git-local
+  // variable while locating the active index; every other repository probe
+  // continues to rediscover this worktree from its explicit cwd.
+  if (process.env.GIT_INDEX_FILE !== undefined) {
+    environment.GIT_INDEX_FILE = process.env.GIT_INDEX_FILE;
+  }
+  return environment;
+}
+
 function resolveGitPath(projectRoot, name) {
   const value = oneLine(
     run("git", ["rev-parse", "--path-format=absolute", "--git-path", name], {
       cwd: projectRoot,
-      env: gitEnvironment(),
+      env: name === "index" ? activeIndexEnvironment() : gitEnvironment(),
     }),
     `Unable to locate Git ${name}.`,
   );

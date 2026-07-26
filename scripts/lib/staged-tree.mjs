@@ -624,7 +624,11 @@ function linkInstalledDependencies(snapshot) {
       fs.statSync(source).isDirectory()
     ) {
       fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.symlinkSync(source, target, "junction");
+      // A consumer's node_modules may itself be a link (as in the test
+      // harness). Windows junctions must point at the resolved directory;
+      // targeting an intermediate file symlink produces a non-directory
+      // junction that Node's package resolution cannot traverse.
+      fs.symlinkSync(fs.realpathSync.native(source), target, "junction");
     }
   }
 }

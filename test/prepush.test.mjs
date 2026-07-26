@@ -1165,7 +1165,9 @@ test("first push of an orphan history falls back safely to the empty tree", (t) 
 
   run("git", ["checkout", "--orphan", "orphan"], tempDir);
   run("git", ["rm", "-rf", "--ignore-unmatch", "."], tempDir);
-  fs.symlinkSync(scriptsTarget, path.join(tempDir, "scripts"));
+  if (!fs.existsSync(path.join(tempDir, "scripts"))) {
+    fs.symlinkSync(scriptsTarget, path.join(tempDir, "scripts"));
+  }
   writeFile(path.join(tempDir, "package.json"), orphanPackage);
   writeFile(path.join(tempDir, "src", "orphan.mjs"), "export const x = 1;\n");
   writeFile(path.join(tempDir, "src", "orphan.test.mjs"), "export {};\n");

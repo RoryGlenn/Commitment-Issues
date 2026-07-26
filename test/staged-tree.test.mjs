@@ -167,6 +167,16 @@ test("captures and materializes one immutable future commit tree", (t) => {
     fs.readFileSync(path.join(tempDir, "src", "snapshot.mjs"), "utf8"),
     worktree,
   );
+  assert.equal(
+    snapshot.entries.some(({ file }) =>
+      ["node_modules", "scripts"].includes(file),
+    ),
+    false,
+  );
+  assertDependencyLink(
+    path.join(tempDir, "node_modules"),
+    path.join(root, "node_modules"),
+  );
   assert.equal(materializeStagedTree(snapshot), root);
 });
 
